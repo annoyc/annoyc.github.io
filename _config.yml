@@ -99,5 +99,5 @@ theme: next
 ## Docs: https://hexo.io/docs/deployment.html
 deploy:
   type: git
-  repository: https://www.github.com/yc2hang/yc2hang.github.io.git
+  repository: https://www.github.com/annoyc/annoyc.github.io.git
   branch: master
