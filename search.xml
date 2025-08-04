@@ -187,37 +187,6 @@
       </tags>
   </entry>
   <entry>
-    <title>leetcode-单词搜索</title>
-    <url>/2020/09/16/leetcode-%E5%8D%95%E8%AF%8D%E6%90%9C%E7%B4%A2/</url>
-    <content><![CDATA[<p>给定一个二维网格和一个单词，找出该单词是否存在于网格中。</p>
-<p>单词必须按照字母顺序，通过相邻的单元格内的字母构成，其中“相邻”单元格是那些水平相邻或垂直相邻的单元格。同一个单元格内的字母不允许被重复使用。</p>
-<a id="more"></a>
-<blockquote>
-<p>原题描述访问：<a href="https://leetcode-cn.com/problems/word-search/" target="_blank" rel="noopener">https://leetcode-cn.com/problems/word-search/</a><br>题解转自：<a href="https://leetcode-cn.com/problems/word-search/solution/shou-hua-tu-jie-79-dan-ci-sou-suo-dfs-si-lu-de-cha/" target="_blank" rel="noopener">https://leetcode-cn.com/problems/word-search/solution/shou-hua-tu-jie-79-dan-ci-sou-suo-dfs-si-lu-de-cha/</a></p>
-</blockquote>
-<p><strong>题意</strong><br>给你一个由字母组成的二维矩阵，和一个单词，能否在矩阵中“勾勒”出一条路径，路径上的字母组成了这个单词。</p>
-<p><strong>思路</strong><br>比如单词 “SEE”，首先起点要对，遍历一遍矩阵，看看哪里有起点 S。<br>起点可能不止一个，基于其中一个 S，能否找出剩下的 “EE” 路径。其实已经有了深搜的思路了。<br>下一个字符 E，有四个可选点：当前 S 点的上、下、左、右。<br>逐个尝试每一种选择，去探索。基于其中一种选择，又要为下一个字符选点，又有四种选择，继续尝试，探索。回溯的思路就有了。<br>每到一个点，做的事情是一样的，是递归DFS。路径类问题经常是 DFS——往下选点，构建路径。<br>当发现某个选择不对，不要继续选下去了，结束当前递归，考察别的选择。</p>
-<p><strong>递归总是关注当前</strong><br>我们在写递归函数时，关注当前，当前考察的点，哪些是当前递归该处理的，哪些是丢给递归子调用去做的。<br>当前递归本身做的事：判断当前选择的点，本身有没有问题，是不是错的。<br>至于剩下的字符，能否找到路径，这件事，交给递归子调用去深搜。<br>如果当前点是错的，也不用往下递归了，直接返回false。否则继续递归搜四个方向，为剩下的字符选点。</p>
-<p><strong>哪些情况说明这是一个错的选择呢？（递归的结束条件）</strong></p>
-<ol>
-<li>当前的点，超出矩阵，不存在。</li>
-<li>当前的点，之前来过了，不符合「同一个单元格内的字母不允许被重复使用」</li>
-<li>当前的点，不是目标点，比如你想找 E，却来了 D。</li>
-</ol>
-<p><strong>当前的点，不是目标点，比如你想找 E，却来了 D。</strong><br>用一个二维矩阵 used，记录已经访问过的点，下次再选择访问这个点，就直接返回 false。</p>
-<p><strong>代码</strong></p>
-<figure class="highlight javascript"><table><tr><td class="code"><pre><span class="line"><span class="keyword">const</span> exist = <span class="function">(<span class="params">board, word</span>) =&gt;</span> &#123;</span><br><span class="line">  <span class="keyword">const</span> m = board.length;</span><br><span class="line">  <span class="keyword">const</span> n = board[<span class="number">0</span>].length;</span><br><span class="line">  <span class="keyword">const</span> used = <span class="keyword">new</span> <span class="built_in">Array</span>(m);    <span class="comment">// 二维矩阵used</span></span><br><span class="line">  <span class="keyword">for</span> (<span class="keyword">let</span> i = <span class="number">0</span>; i &lt; m; i++) &#123;</span><br><span class="line">    used[i] = <span class="keyword">new</span> <span class="built_in">Array</span>(n);</span><br><span class="line">  &#125;</span><br><span class="line">  <span class="comment">// 判断当前点是否是目标路径上的点</span></span><br><span class="line">  <span class="keyword">const</span> dfs = <span class="function">(<span class="params">row, col, i</span>) =&gt;</span> &#123; <span class="comment">// row col是当前点的坐标，i是当前考察的字符索引</span></span><br><span class="line">    <span class="keyword">if</span> (i &gt; word.length - <span class="number">1</span>) &#123;       <span class="comment">// 递归的出口</span></span><br><span class="line">      <span class="keyword">return</span> <span class="literal">true</span>;</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="keyword">if</span> (row &lt; <span class="number">0</span> || row &gt;= m || col &lt; <span class="number">0</span> || col &gt;= n) &#123; <span class="comment">// 当前点要存在</span></span><br><span class="line">      <span class="keyword">return</span> <span class="literal">false</span>;</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="keyword">if</span> (used[row][col] || board[row][col] != word[i]) &#123; <span class="comment">// 当前的点已经走过，或当前点就不是目标点</span></span><br><span class="line">      <span class="keyword">return</span> <span class="literal">false</span>;</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="comment">// 排除掉这些false情况，当前点是没问题的，可以继续递归考察</span></span><br><span class="line">    used[row][col] = <span class="literal">true</span>;  <span class="comment">// used记录一下当前点被访问了</span></span><br><span class="line">    <span class="keyword">const</span> canFindRest =</span><br><span class="line">      dfs(row + <span class="number">1</span>, col, i + <span class="number">1</span>) ||</span><br><span class="line">      dfs(row - <span class="number">1</span>, col, i + <span class="number">1</span>) ||</span><br><span class="line">      dfs(row, col + <span class="number">1</span>, i + <span class="number">1</span>) ||</span><br><span class="line">      dfs(row, col - <span class="number">1</span>, i + <span class="number">1</span>); </span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (canFindRest) &#123; <span class="comment">// 基于当前点，可以为剩下的字符找到路径</span></span><br><span class="line">      <span class="keyword">return</span> <span class="literal">true</span>;    </span><br><span class="line">    &#125;</span><br><span class="line">    used[row][col] = <span class="literal">false</span>; <span class="comment">// 找不出，返回false，继续考察别的分支，并撤销当前点的访问状态。</span></span><br><span class="line">    <span class="keyword">return</span> <span class="literal">false</span>;</span><br><span class="line">  &#125;;</span><br><span class="line"></span><br><span class="line">  <span class="keyword">for</span> (<span class="keyword">let</span> i = <span class="number">0</span>; i &lt; m; i++) &#123;</span><br><span class="line">    <span class="keyword">for</span> (<span class="keyword">let</span> j = <span class="number">0</span>; j &lt; n; j++) &#123;</span><br><span class="line">      <span class="keyword">if</span> (board[i][j] == word[<span class="number">0</span>] &amp;&amp; dfs(i, j, <span class="number">0</span>)) &#123; <span class="comment">// 找到dfs的起点</span></span><br><span class="line">        <span class="keyword">return</span> <span class="literal">true</span>; <span class="comment">// 找到起点，且dfs的结果也true，则找到了目标路径</span></span><br><span class="line">      &#125;</span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">  <span class="keyword">return</span> <span class="literal">false</span>; <span class="comment">// 怎么样都没有返回true，则返回false</span></span><br><span class="line">&#125;;</span><br></pre></td></tr></table></figure>]]></content>
-      <categories>
-        <category>算法与数据结构</category>
-      </categories>
-      <tags>
-        <tag>递归</tag>
-        <tag>leetcode</tag>
-        <tag>回溯</tag>
-        <tag>dfs</tag>
-      </tags>
-  </entry>
-  <entry>
     <title>leetcode-组合</title>
     <url>/2020/09/09/leetcode-%E7%BB%84%E5%90%88/</url>
     <content><![CDATA[<p>给定两个整数 n 和 k，返回 1 … n 中所有可能的 k 个数的组合。</p>
@@ -234,8 +203,8 @@
       <tags>
         <tag>递归</tag>
         <tag>leetcode</tag>
-        <tag>回溯</tag>
         <tag>dfs</tag>
+        <tag>回溯</tag>
       </tags>
   </entry>
   <entry>
@@ -265,8 +234,39 @@
       <tags>
         <tag>递归</tag>
         <tag>leetcode</tag>
-        <tag>回溯</tag>
         <tag>dfs</tag>
+        <tag>回溯</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>leetcode-单词搜索</title>
+    <url>/2020/09/16/leetcode-%E5%8D%95%E8%AF%8D%E6%90%9C%E7%B4%A2/</url>
+    <content><![CDATA[<p>给定一个二维网格和一个单词，找出该单词是否存在于网格中。</p>
+<p>单词必须按照字母顺序，通过相邻的单元格内的字母构成，其中“相邻”单元格是那些水平相邻或垂直相邻的单元格。同一个单元格内的字母不允许被重复使用。</p>
+<a id="more"></a>
+<blockquote>
+<p>原题描述访问：<a href="https://leetcode-cn.com/problems/word-search/" target="_blank" rel="noopener">https://leetcode-cn.com/problems/word-search/</a><br>题解转自：<a href="https://leetcode-cn.com/problems/word-search/solution/shou-hua-tu-jie-79-dan-ci-sou-suo-dfs-si-lu-de-cha/" target="_blank" rel="noopener">https://leetcode-cn.com/problems/word-search/solution/shou-hua-tu-jie-79-dan-ci-sou-suo-dfs-si-lu-de-cha/</a></p>
+</blockquote>
+<p><strong>题意</strong><br>给你一个由字母组成的二维矩阵，和一个单词，能否在矩阵中“勾勒”出一条路径，路径上的字母组成了这个单词。</p>
+<p><strong>思路</strong><br>比如单词 “SEE”，首先起点要对，遍历一遍矩阵，看看哪里有起点 S。<br>起点可能不止一个，基于其中一个 S，能否找出剩下的 “EE” 路径。其实已经有了深搜的思路了。<br>下一个字符 E，有四个可选点：当前 S 点的上、下、左、右。<br>逐个尝试每一种选择，去探索。基于其中一种选择，又要为下一个字符选点，又有四种选择，继续尝试，探索。回溯的思路就有了。<br>每到一个点，做的事情是一样的，是递归DFS。路径类问题经常是 DFS——往下选点，构建路径。<br>当发现某个选择不对，不要继续选下去了，结束当前递归，考察别的选择。</p>
+<p><strong>递归总是关注当前</strong><br>我们在写递归函数时，关注当前，当前考察的点，哪些是当前递归该处理的，哪些是丢给递归子调用去做的。<br>当前递归本身做的事：判断当前选择的点，本身有没有问题，是不是错的。<br>至于剩下的字符，能否找到路径，这件事，交给递归子调用去深搜。<br>如果当前点是错的，也不用往下递归了，直接返回false。否则继续递归搜四个方向，为剩下的字符选点。</p>
+<p><strong>哪些情况说明这是一个错的选择呢？（递归的结束条件）</strong></p>
+<ol>
+<li>当前的点，超出矩阵，不存在。</li>
+<li>当前的点，之前来过了，不符合「同一个单元格内的字母不允许被重复使用」</li>
+<li>当前的点，不是目标点，比如你想找 E，却来了 D。</li>
+</ol>
+<p><strong>当前的点，不是目标点，比如你想找 E，却来了 D。</strong><br>用一个二维矩阵 used，记录已经访问过的点，下次再选择访问这个点，就直接返回 false。</p>
+<p><strong>代码</strong></p>
+<figure class="highlight javascript"><table><tr><td class="code"><pre><span class="line"><span class="keyword">const</span> exist = <span class="function">(<span class="params">board, word</span>) =&gt;</span> &#123;</span><br><span class="line">  <span class="keyword">const</span> m = board.length;</span><br><span class="line">  <span class="keyword">const</span> n = board[<span class="number">0</span>].length;</span><br><span class="line">  <span class="keyword">const</span> used = <span class="keyword">new</span> <span class="built_in">Array</span>(m);    <span class="comment">// 二维矩阵used</span></span><br><span class="line">  <span class="keyword">for</span> (<span class="keyword">let</span> i = <span class="number">0</span>; i &lt; m; i++) &#123;</span><br><span class="line">    used[i] = <span class="keyword">new</span> <span class="built_in">Array</span>(n);</span><br><span class="line">  &#125;</span><br><span class="line">  <span class="comment">// 判断当前点是否是目标路径上的点</span></span><br><span class="line">  <span class="keyword">const</span> dfs = <span class="function">(<span class="params">row, col, i</span>) =&gt;</span> &#123; <span class="comment">// row col是当前点的坐标，i是当前考察的字符索引</span></span><br><span class="line">    <span class="keyword">if</span> (i &gt; word.length - <span class="number">1</span>) &#123;       <span class="comment">// 递归的出口</span></span><br><span class="line">      <span class="keyword">return</span> <span class="literal">true</span>;</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="keyword">if</span> (row &lt; <span class="number">0</span> || row &gt;= m || col &lt; <span class="number">0</span> || col &gt;= n) &#123; <span class="comment">// 当前点要存在</span></span><br><span class="line">      <span class="keyword">return</span> <span class="literal">false</span>;</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="keyword">if</span> (used[row][col] || board[row][col] != word[i]) &#123; <span class="comment">// 当前的点已经走过，或当前点就不是目标点</span></span><br><span class="line">      <span class="keyword">return</span> <span class="literal">false</span>;</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="comment">// 排除掉这些false情况，当前点是没问题的，可以继续递归考察</span></span><br><span class="line">    used[row][col] = <span class="literal">true</span>;  <span class="comment">// used记录一下当前点被访问了</span></span><br><span class="line">    <span class="keyword">const</span> canFindRest =</span><br><span class="line">      dfs(row + <span class="number">1</span>, col, i + <span class="number">1</span>) ||</span><br><span class="line">      dfs(row - <span class="number">1</span>, col, i + <span class="number">1</span>) ||</span><br><span class="line">      dfs(row, col + <span class="number">1</span>, i + <span class="number">1</span>) ||</span><br><span class="line">      dfs(row, col - <span class="number">1</span>, i + <span class="number">1</span>); </span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> (canFindRest) &#123; <span class="comment">// 基于当前点，可以为剩下的字符找到路径</span></span><br><span class="line">      <span class="keyword">return</span> <span class="literal">true</span>;    </span><br><span class="line">    &#125;</span><br><span class="line">    used[row][col] = <span class="literal">false</span>; <span class="comment">// 找不出，返回false，继续考察别的分支，并撤销当前点的访问状态。</span></span><br><span class="line">    <span class="keyword">return</span> <span class="literal">false</span>;</span><br><span class="line">  &#125;;</span><br><span class="line"></span><br><span class="line">  <span class="keyword">for</span> (<span class="keyword">let</span> i = <span class="number">0</span>; i &lt; m; i++) &#123;</span><br><span class="line">    <span class="keyword">for</span> (<span class="keyword">let</span> j = <span class="number">0</span>; j &lt; n; j++) &#123;</span><br><span class="line">      <span class="keyword">if</span> (board[i][j] == word[<span class="number">0</span>] &amp;&amp; dfs(i, j, <span class="number">0</span>)) &#123; <span class="comment">// 找到dfs的起点</span></span><br><span class="line">        <span class="keyword">return</span> <span class="literal">true</span>; <span class="comment">// 找到起点，且dfs的结果也true，则找到了目标路径</span></span><br><span class="line">      &#125;</span><br><span class="line">    &#125;</span><br><span class="line">  &#125;</span><br><span class="line">  <span class="keyword">return</span> <span class="literal">false</span>; <span class="comment">// 怎么样都没有返回true，则返回false</span></span><br><span class="line">&#125;;</span><br></pre></td></tr></table></figure>]]></content>
+      <categories>
+        <category>算法与数据结构</category>
+      </categories>
+      <tags>
+        <tag>递归</tag>
+        <tag>leetcode</tag>
+        <tag>dfs</tag>
+        <tag>回溯</tag>
       </tags>
   </entry>
   <entry>
@@ -299,8 +299,8 @@
       <tags>
         <tag>递归</tag>
         <tag>leetcode</tag>
-        <tag>回溯</tag>
         <tag>dfs</tag>
+        <tag>回溯</tag>
       </tags>
   </entry>
   <entry>
@@ -321,8 +321,8 @@
       <tags>
         <tag>递归</tag>
         <tag>leetcode</tag>
-        <tag>回溯</tag>
         <tag>dfs</tag>
+        <tag>回溯</tag>
       </tags>
   </entry>
   <entry>
@@ -524,6 +524,42 @@
       </tags>
   </entry>
   <entry>
+    <title>回流和重绘</title>
+    <url>/2020/09/05/%E5%9B%9E%E6%B5%81%E5%92%8C%E9%87%8D%E7%BB%98/</url>
+    <content><![CDATA[<p>网页的回流和重绘知识点如下：</p>
+<a id="more"></a>
+<ol>
+<li><strong>回流</strong><br>回流又称之为<strong>重排</strong>，当Render Tree中的一部分（或者全部）因元素的规模，尺寸，布局等改变，而需要重新构建页面，就会触发回流<br>具体总结为：<ul>
+<li>页面初始渲染</li>
+<li>添加、删除可见的DOM元素</li>
+<li>改变元素位置，尺寸，内容<br>触发回流的属性：</li>
+<li>盒子模型相关属性：width、height、display、border、border-width…</li>
+<li>定位及浮动：position、left、right、top、bottom、float、padding、margin…</li>
+<li>文字相关：text-align、overflow、font-weight、font-family、line-height，vertical-align、font-size、white-space…</li>
+</ul>
+</li>
+<li><strong>重绘</strong><br>当Render Tree中的一些元素需要更新属性，而这些属性只是影响到元素的外观，风格而不影响布局，就会触发重绘<br><strong>回流一定重绘，但是重绘不一定回流</strong><br>触发重绘的属性：<ul>
+<li>color、border-style、border-radius、outline、visibility、background-color、text-decoration、background、background-image、box-shadow…</li>
+</ul>
+</li>
+<li>如何减少回流和重绘<ul>
+<li>用translate代替top</li>
+<li>用opacity代替visibility</li>
+<li>预先定义好className，然后统一修改Dom的className</li>
+<li>不要把Dom结点的属性值放在一个循环里面变成循环变量</li>
+<li>让要操作的元素进行“离线处理”，处理完后一起更新</li>
+</ul>
+</li>
+</ol>
+]]></content>
+      <categories>
+        <category>CSS</category>
+      </categories>
+      <tags>
+        <tag>面试题</tag>
+      </tags>
+  </entry>
+  <entry>
     <title>回溯算法</title>
     <url>/2020/09/11/%E5%9B%9E%E6%BA%AF%E7%AE%97%E6%B3%95/</url>
     <content><![CDATA[<p>回溯跟递归，深度搜索遍历结合使用，是非常普遍的算法思路。下面介绍回溯思路</p>
@@ -561,44 +597,8 @@
       </categories>
       <tags>
         <tag>递归</tag>
-        <tag>回溯</tag>
         <tag>dfs</tag>
-      </tags>
-  </entry>
-  <entry>
-    <title>回流和重绘</title>
-    <url>/2020/09/05/%E5%9B%9E%E6%B5%81%E5%92%8C%E9%87%8D%E7%BB%98/</url>
-    <content><![CDATA[<p>网页的回流和重绘知识点如下：</p>
-<a id="more"></a>
-<ol>
-<li><strong>回流</strong><br>回流又称之为<strong>重排</strong>，当Render Tree中的一部分（或者全部）因元素的规模，尺寸，布局等改变，而需要重新构建页面，就会触发回流<br>具体总结为：<ul>
-<li>页面初始渲染</li>
-<li>添加、删除可见的DOM元素</li>
-<li>改变元素位置，尺寸，内容<br>触发回流的属性：</li>
-<li>盒子模型相关属性：width、height、display、border、border-width…</li>
-<li>定位及浮动：position、left、right、top、bottom、float、padding、margin…</li>
-<li>文字相关：text-align、overflow、font-weight、font-family、line-height，vertical-align、font-size、white-space…</li>
-</ul>
-</li>
-<li><strong>重绘</strong><br>当Render Tree中的一些元素需要更新属性，而这些属性只是影响到元素的外观，风格而不影响布局，就会触发重绘<br><strong>回流一定重绘，但是重绘不一定回流</strong><br>触发重绘的属性：<ul>
-<li>color、border-style、border-radius、outline、visibility、background-color、text-decoration、background、background-image、box-shadow…</li>
-</ul>
-</li>
-<li>如何减少回流和重绘<ul>
-<li>用translate代替top</li>
-<li>用opacity代替visibility</li>
-<li>预先定义好className，然后统一修改Dom的className</li>
-<li>不要把Dom结点的属性值放在一个循环里面变成循环变量</li>
-<li>让要操作的元素进行“离线处理”，处理完后一起更新</li>
-</ul>
-</li>
-</ol>
-]]></content>
-      <categories>
-        <category>CSS</category>
-      </categories>
-      <tags>
-        <tag>面试题</tag>
+        <tag>回溯</tag>
       </tags>
   </entry>
   <entry>
