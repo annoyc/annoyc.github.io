@@ -1,0 +1,1067 @@
+<!DOCTYPE html>
+
+
+
+  
+
+
+<html class="theme-next mist use-motion" lang="zh-Hans">
+<head>
+  <meta charset="UTF-8"/>
+<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+<meta name="theme-color" content="#222">
+
+
+
+
+
+
+
+
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+  
+  <link href="/lib/fancybox/source/jquery.fancybox.css?v=2.1.5" rel="stylesheet" type="text/css" />
+
+
+
+
+
+
+
+<link href="/lib/font-awesome/css/font-awesome.min.css?v=4.6.2" rel="stylesheet" type="text/css" />
+
+<link href="/css/main.css?v=5.1.4" rel="stylesheet" type="text/css" />
+
+
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png?v=5.1.4">
+
+
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png?v=5.1.4">
+
+
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png?v=5.1.4">
+
+
+  <link rel="mask-icon" href="/images/logo.svg?v=5.1.4" color="#222">
+
+
+
+
+
+  <meta name="keywords" content="Agent,Agent Loop," />
+
+
+
+
+
+
+
+
+
+
+<meta name="description" content="刚开始看 Agent 相关资料时，满屏都是“自主规划”“多步推理”这类词，看得人发虚。后来自己动手写了一个最小版本，才发现核心代码不到 30 行，就是一个 while 循环。今天就把这个循环拆开讲清楚，顺便聊聊它最容易出问题的两个地方：什么时候停，以及上下文越堆越长怎么办。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Agent 拆开看，就是一个 while 循环">
+<meta property="og:url" content="http://yc-sky.top/2026/11/04/agent-is-a-while-loop/index.html">
+<meta property="og:site_name" content="Yc的博客">
+<meta property="og:description" content="刚开始看 Agent 相关资料时，满屏都是“自主规划”“多步推理”这类词，看得人发虚。后来自己动手写了一个最小版本，才发现核心代码不到 30 行，就是一个 while 循环。今天就把这个循环拆开讲清楚，顺便聊聊它最容易出问题的两个地方：什么时候停，以及上下文越堆越长怎么办。">
+<meta property="article:published_time" content="2026-11-04T06:00:00.000Z">
+<meta property="article:modified_time" content="2026-11-04T06:00:00.000Z">
+<meta property="article:author" content="ycblue">
+<meta property="article:tag" content="Agent">
+<meta property="article:tag" content="Agent Loop">
+<meta name="twitter:card" content="summary">
+
+
+
+<script type="text/javascript" id="hexo.configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    root: '/',
+    scheme: 'Mist',
+    version: '5.1.4',
+    sidebar: {"position":"left","display":"hide","offset":12,"b2t":false,"scrollpercent":false,"onmobile":false},
+    fancybox: true,
+    tabs: true,
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}},
+    duoshuo: {
+      userId: '0',
+      author: '博主'
+    },
+    algolia: {
+      applicationID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    }
+  };
+</script>
+
+
+
+  <link rel="canonical" href="http://yc-sky.top/2026/11/04/agent-is-a-while-loop/"/>
+
+
+
+
+
+  <title>Agent 拆开看，就是一个 while 循环 | Yc的博客</title>
+  
+
+
+
+
+
+
+
+
+<meta name="generator" content="Hexo 4.2.0"></head>
+
+<body itemscope itemtype="http://schema.org/WebPage" lang="zh-Hans">
+
+  
+  
+    
+  
+
+  <div class="container sidebar-position-left page-post-detail">
+    <div class="headband"></div>
+
+    <header id="header" class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-wrapper">
+  <div class="site-meta ">
+    
+
+    <div class="custom-logo-site-title">
+      <a href="/"  class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">Yc的博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+      
+        <p class="site-subtitle"></p>
+      
+  </div>
+
+  <div class="site-nav-toggle">
+    <button>
+      <span class="btn-bar"></span>
+      <span class="btn-bar"></span>
+      <span class="btn-bar"></span>
+    </button>
+  </div>
+</div>
+
+<nav class="site-nav">
+  
+
+  
+    <ul id="menu" class="menu">
+      
+        
+        <li class="menu-item menu-item-home">
+          <a href="/" rel="section">
+            
+              <i class="menu-item-icon fa fa-fw fa-home"></i> <br />
+            
+            首页
+          </a>
+        </li>
+      
+        
+        <li class="menu-item menu-item-agent">
+          <a href="/agent/" rel="section">
+              <i class="menu-item-icon fa fa-fw fa-lightbulb-o"></i> <br />
+            Agent
+          </a>
+        </li>
+        <li class="menu-item menu-item-tags">
+          <a href="/tags/" rel="section">
+            
+              <i class="menu-item-icon fa fa-fw fa-tags"></i> <br />
+            
+            标签
+          </a>
+        </li>
+      
+        
+        <li class="menu-item menu-item-archives">
+          <a href="/archives/" rel="section">
+            
+              <i class="menu-item-icon fa fa-fw fa-archive"></i> <br />
+            
+            归档
+          </a>
+        </li>
+      
+
+      
+        <li class="menu-item menu-item-search">
+          
+            <a href="javascript:;" class="popup-trigger">
+          
+            
+              <i class="menu-item-icon fa fa-search fa-fw"></i> <br />
+            
+            搜索
+          </a>
+        </li>
+      
+    </ul>
+  
+
+  
+    <div class="site-search">
+      
+  <div class="popup search-popup local-search-popup">
+  <div class="local-search-header clearfix">
+    <span class="search-icon">
+      <i class="fa fa-search"></i>
+    </span>
+    <span class="popup-btn-close">
+      <i class="fa fa-times-circle"></i>
+    </span>
+    <div class="local-search-input-wrapper">
+      <input autocomplete="off"
+             placeholder="搜索..." spellcheck="false"
+             type="text" id="local-search-input">
+    </div>
+  </div>
+  <div id="local-search-result"></div>
+</div>
+
+
+
+    </div>
+  
+</nav>
+
+
+
+ </div>
+    </header>
+
+    <main id="main" class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          <div id="content" class="content">
+            
+
+  <div id="posts" class="posts-expand">
+    
+
+  
+
+  
+  
+  
+
+  <article class="post post-type-normal" itemscope itemtype="http://schema.org/Article">
+  
+  
+  
+  <div class="post-block">
+    <link itemprop="mainEntityOfPage" href="http://yc-sky.top/2026/11/04/agent-is-a-while-loop/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="name" content="ycblue">
+      <meta itemprop="description" content="">
+      <meta itemprop="image" content="https://cdn.jsdelivr.net/gh/yc2hang/cdn-assets/avatar/avatar.jpg">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="Yc的博客">
+    </span>
+
+    
+      <header class="post-header">
+
+        
+        
+          <h1 class="post-title" itemprop="name headline">Agent 拆开看，就是一个 while 循环</h1>
+        
+      </header>
+    
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+<p>刚开始看 Agent 相关资料时，满屏都是“自主规划”“多步推理”这类词，看得人发虚。后来自己动手写了一个最小版本，才发现核心代码不到 30 行，就是一个 while 循环。今天就把这个循环拆开讲清楚，顺便聊聊它最容易出问题的两个地方：什么时候停，以及上下文越堆越长怎么办。</p>
+<a id="more"></a>
+<h2 id="先看普通的一次调用"><a href="#先看普通的一次调用" class="headerlink" title="先看普通的一次调用"></a>先看普通的一次调用</h2>
+<p>平时我们调大模型接口，是一问一答：把 messages 发过去，拿回一段文本，结束。</p>
+<p>Agent 多了一样东西：<strong>工具</strong>。你在请求里告诉模型“我这边有这几个函数可以用”，模型回复的时候，可以不直接回答，而是说“请帮我调用一下 <code>readFile</code>，参数是 <code>src/App.vue</code>”。</p>
+<p>注意，模型自己是执行不了任何东西的，它只是<strong>提出</strong>要调用什么。真正去读文件、发请求的，是我们写的代码。执行完以后，把结果再塞回 messages 里，发给模型，让它接着想。</p>
+<p>然后模型可能又要调一个工具，我们再执行、再塞回去……直到它觉得信息够了，直接给出最终回答。</p>
+<p>这一来一回，就是 Agent Loop。</p>
+<h2 id="30-行代码写出来"><a href="#30-行代码写出来" class="headerlink" title="30 行代码写出来"></a>30 行代码写出来</h2>
+<p>用 JS 写一个最小版本（<code>callModel</code> 换成你用的任何一家 SDK 都行，结构是一样的）：</p>
+<figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br></pre></td><td class="code"><pre><span class="line">const tools = {</span><br><span class="line">  readFile: async ({ path }) =&gt; fs.readFile(path, 'utf-8'),</span><br><span class="line">  listDir: async ({ dir }) =&gt; (await fs.readdir(dir)).join('\n'),</span><br><span class="line">};</span><br><span class="line"></span><br><span class="line">async function runAgent(task) {</span><br><span class="line">  const messages = [{ role: 'user', content: task }];</span><br><span class="line"></span><br><span class="line">  while (true) {</span><br><span class="line">    const reply = await callModel({ messages, tools: toolSchemas });</span><br><span class="line">    messages.push(reply);</span><br><span class="line"></span><br><span class="line">    // 模型没要求调工具，说明它认为可以交卷了</span><br><span class="line">    if (!reply.toolCalls?.length) {</span><br><span class="line">      return reply.content;</span><br><span class="line">    }</span><br><span class="line"></span><br><span class="line">    // 把模型要的工具挨个执行，结果原样塞回去</span><br><span class="line">    for (const call of reply.toolCalls) {</span><br><span class="line">      let result;</span><br><span class="line">      try {</span><br><span class="line">        result = await tools[call.name](call.args);</span><br><span class="line">      } catch (err) {</span><br><span class="line">        result = `调用失败：${err.message}`;</span><br><span class="line">      }</span><br><span class="line">      messages.push({ role: 'tool', toolCallId: call.id, content: String(result) });</span><br><span class="line">    }</span><br><span class="line">  }</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p>就这些。所谓“自主规划”，其实是模型在每一轮根据 messages 里已有的信息，决定下一步调哪个工具。我们的代码只负责三件事：<strong>转发、执行、追加</strong>。</p>
+<p>有个细节值得留意：工具报错的时候，我没有 throw，而是把错误信息当成结果还给模型。这样模型能看到“路径不存在”，然后自己换个路径再试。对模型来说，错误信息也是信息。</p>
+<p>写前端的同学可以这么类比：这有点像一个 reducer，messages 是 state，每一轮模型给出一个 action，我们执行 action 产生新的 state，再喂回去。区别在于这个 reducer 什么时候停，是模型自己说了算。</p>
+<p>而问题恰恰出在这里。</p>
+<h2 id="坑一只靠模型自己说做完了"><a href="#坑一只靠模型自己说做完了" class="headerlink" title="坑一：只靠模型自己说“做完了”"></a>坑一：只靠模型自己说“做完了”</h2>
+<p>上面的代码只有一个出口：模型不再调工具。</p>
+<p>听着合理，但实际跑起来会遇到两种情况。一种是模型陷入死循环，同一个工具、同样的参数反复调，因为它没意识到结果不会变；另一种更隐蔽，模型说“已完成”，其实测试根本没跑，或者跑了没过。</p>
+<p>所以真实项目里，至少要给这个循环加几道闸：</p>
+<figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br></pre></td><td class="code"><pre><span class="line">const MAX_TURNS = 20;</span><br><span class="line">let turns = 0;</span><br><span class="line">const seen = new Set();</span><br><span class="line"></span><br><span class="line">while (true) {</span><br><span class="line">  if (++turns &gt; MAX_TURNS) throw new Error('超过最大轮数，强制停止');</span><br><span class="line"></span><br><span class="line">  const reply = await callModel({ messages, tools: toolSchemas });</span><br><span class="line">  messages.push(reply);</span><br><span class="line"></span><br><span class="line">  if (!reply.toolCalls?.length) {</span><br><span class="line">    // 别急着信它，用代码验一遍</span><br><span class="line">    if (await checkDone()) return reply.content;</span><br><span class="line">    messages.push({ role: 'user', content: '检查没通过，请继续。' });</span><br><span class="line">    continue;</span><br><span class="line">  }</span><br><span class="line"></span><br><span class="line">  for (const call of reply.toolCalls) {</span><br><span class="line">    const key = call.name + JSON.stringify(call.args);</span><br><span class="line">    if (seen.has(key)) {</span><br><span class="line">      messages.push({ role: 'tool', toolCallId: call.id, content: '这个调用刚才做过了，结果不会变，换个思路。' });</span><br><span class="line">      continue;</span><br><span class="line">    }</span><br><span class="line">    seen.add(key);</span><br><span class="line">    // ...正常执行</span><br><span class="line">  }</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p>三道闸分别是：<strong>最大轮数</strong>（兜底，防止烧钱），<strong>重复调用检测</strong>（发现原地打转就提醒它），<strong>完成校验</strong>（<code>checkDone</code> 用代码判断，比如跑一下测试、看看文件是不是真的生成了）。</p>
+<p>最后一条最重要。我看到一篇讲 loop 的文章里有句话说得很直白：“做完了”应该意味着测试通过，而不是模型说它做完了。</p>
+<h2 id="坑二messages-只增不减"><a href="#坑二messages-只增不减" class="headerlink" title="坑二：messages 只增不减"></a>坑二：messages 只增不减</h2>
+<p>再看一眼那个循环，<code>messages.push</code> 出现了好几次，但从来没有删过东西。</p>
+<p>每调一次工具，结果就整个塞进去。读一个 500 行的文件，这 500 行就永远留在上下文里了。跑个十几轮，token 数会涨得很夸张，速度变慢、费用变高，而且模型面对一大坨旧信息，注意力反而会被稀释。</p>
+<p>今年 6 月微软有篇论文（<em>Less Context, Better Agents</em>）专门测了这件事。他们让 Agent 通过 MCP 在 Dynamics 365 里处理酒店报销单，对比了三种做法：</p>
+<table>
+<thead>
+<tr>
+<th>做法</th>
+<th>完全处理成功率</th>
+<th>总 token</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>保留全部历史</td>
+<td>71.0%</td>
+<td>约 148 万</td>
+</tr>
+<tr>
+<td>只保留最近 5 轮工具调用</td>
+<td>79.0%</td>
+<td>约 53.5 万</td>
+</tr>
+<tr>
+<td>最近 5 轮 + 更早的部分做摘要</td>
+<td>91.6%</td>
+<td>约 55.3 万</td>
+</tr>
+</tbody>
+</table>
+<p>这组数据挺反直觉的：删掉旧的工具结果，效果不降反升；再给删掉的部分留一段摘要，成功率又涨了十几个点，token 只多了一点点。</p>
+<p>落到代码上，思路很简单：每轮调用模型之前，对 messages 做一次“瘦身”。最近几轮的工具结果原样保留，更早的替换成一句话摘要，或者干脆只留个“已读取 xxx 文件”的占位。</p>
+<figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">function compact(messages, keep = 5) {</span><br><span class="line">  const toolMsgs = messages.filter(m =&gt; m.role === 'tool');</span><br><span class="line">  const old = new Set(toolMsgs.slice(0, -keep));</span><br><span class="line">  return messages.map(m =&gt;</span><br><span class="line">    old.has(m) ? { ...m, content: summarize(m.content) } : m</span><br><span class="line">  );</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p><code>summarize</code> 可以先用最笨的办法，截取前 200 个字符；之后再换成让一个便宜的小模型来写摘要。</p>
+<h2 id="小结"><a href="#小结" class="headerlink" title="小结"></a>小结</h2>
+<p>如果只记住一件事，那就是：<strong>Agent = 模型 + 工具 + 一个循环</strong>。模型负责决定下一步做什么，循环负责执行和反馈。</p>
+<p>真正花工夫的地方不在循环本身，而在循环的边界上：什么时候停（不能只听模型的），以及每一轮给模型看什么（不是越多越好）。后面这件事现在有个专门的叫法，叫 Context Engineering，之后单独写一篇。</p>
+<p>建议动手写一遍上面的代码，给它两个读文件的工具，让它回答“这个项目用的是什么构建工具”。看着它一步步 <code>listDir</code>、<code>readFile</code>、再给出答案，比看十篇概念文章都管用。</p>
+<p>参考：</p>
+<ul>
+<li><a href="https://arxiv.org/html/2606.10209" target="_blank" rel="noopener">Less Context, Better Agents: Efficient Context Engineering for Long-Horizon Tool-Using LLM Agents</a></li>
+<li><a href="https://www.dailydoseofds.com/p/loop-engineering-clearly-explained/" target="_blank" rel="noopener">Loop Engineering, Clearly Explained</a></li>
+</ul>
+    </div>
+
+    <footer class="post-footer">
+        <div class="post-tags">
+          <a href="/agent/" rel="tag"># Agent</a>
+          <a href="/agent/" rel="tag"># Agent Loop</a>
+        </div>
+        <div class="post-nav">
+          <div class="post-nav-next post-nav-item">
+              
+          </div>
+          <span class="post-nav-divider"></span>
+          <div class="post-nav-prev post-nav-item">
+              
+          </div>
+        </div>
+    </footer>
+  </div>
+  
+  
+  
+  </article>
+
+
+
+    <div class="post-spread">
+      
+    </div>
+  </div>
+
+
+          </div>
+          
+
+
+          
+
+  
+
+
+
+        </div>
+        
+          
+  
+  <div class="sidebar-toggle">
+    <div class="sidebar-toggle-line-wrap">
+      <span class="sidebar-toggle-line sidebar-toggle-line-first"></span>
+      <span class="sidebar-toggle-line sidebar-toggle-line-middle"></span>
+      <span class="sidebar-toggle-line sidebar-toggle-line-last"></span>
+    </div>
+  </div>
+
+  <aside id="sidebar" class="sidebar">
+    
+    <div class="sidebar-inner">
+
+      
+
+      
+        <ul class="sidebar-nav motion-element">
+          <li class="sidebar-nav-toc sidebar-nav-active" data-target="post-toc-wrap">
+            文章目录
+          </li>
+          <li class="sidebar-nav-overview" data-target="site-overview-wrap">
+            站点概览
+          </li>
+        </ul>
+      
+
+      <section class="site-overview-wrap sidebar-panel">
+        <div class="site-overview">
+          <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+            
+              <img class="site-author-image" itemprop="image"
+                src="https://cdn.jsdelivr.net/gh/yc2hang/cdn-assets/avatar/avatar.jpg"
+                alt="ycblue" />
+            
+              <p class="site-author-name" itemprop="name">ycblue</p>
+              <p class="site-description motion-element" itemprop="description">stay hungry, stay foolish</p>
+          </div>
+
+          <nav class="site-state motion-element">
+
+            
+              <div class="site-state-item site-state-posts">
+              
+                <a href="/archives/%7C%7Carchive">
+              
+                  <span class="site-state-item-count">30</span>
+                  <span class="site-state-item-name">日志</span>
+                </a>
+              </div>
+            
+
+            
+              
+              
+              <div class="site-state-item site-state-categories">
+                <a href="/categories/index.html">
+                  <span class="site-state-item-count">3</span>
+                  <span class="site-state-item-name">分类</span>
+                </a>
+              </div>
+            
+
+            
+              
+              
+              <div class="site-state-item site-state-tags">
+                <a href="/tags/index.html">
+                  <span class="site-state-item-count">14</span>
+                  <span class="site-state-item-name">标签</span>
+                </a>
+              </div>
+            
+
+          </nav>
+
+          
+
+          
+            <div class="links-of-author motion-element">
+                
+                  <span class="links-of-author-item">
+                    <a href="https://github.com/yc2hang" target="_blank" title="GitHub">
+                      
+                        <i class="fa fa-fw fa-github"></i>GitHub</a>
+                  </span>
+                
+                  <span class="links-of-author-item">
+                    <a href="mailto:yc2hangycz@gmail.com" target="_blank" title="E-Mail">
+                      
+                        <i class="fa fa-fw fa-envelope"></i>E-Mail</a>
+                  </span>
+                
+            </div>
+          
+
+          
+          
+
+          
+          
+
+          
+
+        </div>
+      </section>
+
+      
+      <!--noindex-->
+        <section class="post-toc-wrap motion-element sidebar-panel sidebar-panel-active">
+          <div class="post-toc">
+
+            
+              
+            
+
+            
+              <div class="post-toc-content"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#先看普通的一次调用"><span class="nav-number">1.</span> <span class="nav-text">先看普通的一次调用</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#30-行代码写出来"><span class="nav-number">2.</span> <span class="nav-text">30 行代码写出来</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#坑一只靠模型自己说做完了"><span class="nav-number">3.</span> <span class="nav-text">坑一：只靠模型自己说“做完了”</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#坑二messages-只增不减"><span class="nav-number">4.</span> <span class="nav-text">坑二：messages 只增不减</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#小结"><span class="nav-number">5.</span> <span class="nav-text">小结</span></a></li></ol></div>
+            
+
+          </div>
+        </section>
+      <!--/noindex-->
+      
+
+      
+
+    </div>
+  </aside>
+
+
+        
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="footer-inner">
+        <div class="copyright">&copy; <span itemprop="copyrightYear">2025</span>
+  <span class="with-love">
+    <i class="fa fa-heart"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">ycblue</span>
+
+  
+</div>
+
+
+  <div class="powered-by">由 <a class="theme-link" target="_blank" href="https://hexo.io">Hexo</a> 强力驱动</div>
+
+
+
+  <span class="post-meta-divider">|</span>
+
+
+
+  <div class="theme-info">主题 &mdash; <a class="theme-link" target="_blank" href="https://github.com/iissnan/hexo-theme-next">NexT.Mist</a> v5.1.4</div>
+
+
+
+
+        
+
+
+
+
+
+
+
+        
+      </div>
+    </footer>
+
+    
+      <div class="back-to-top">
+        <i class="fa fa-arrow-up"></i>
+        
+      </div>
+    
+
+    
+
+  </div>
+
+  
+
+<script type="text/javascript">
+  if (Object.prototype.toString.call(window.Promise) !== '[object Function]') {
+    window.Promise = null;
+  }
+</script>
+
+
+
+
+
+
+
+
+
+  
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+  
+  
+    <script type="text/javascript" src="/lib/jquery/index.js?v=2.1.3"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/fastclick/lib/fastclick.min.js?v=1.0.6"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/jquery_lazyload/jquery.lazyload.js?v=1.9.7"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/velocity/velocity.min.js?v=1.2.1"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/velocity/velocity.ui.min.js?v=1.2.1"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/fancybox/source/jquery.fancybox.pack.js?v=2.1.5"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/canvas-nest/canvas-nest.min.js"></script>
+  
+
+
+  
+
+
+  <script type="text/javascript" src="/js/src/utils.js?v=5.1.4"></script>
+
+  <script type="text/javascript" src="/js/src/motion.js?v=5.1.4"></script>
+
+
+
+  
+  
+
+  
+  <script type="text/javascript" src="/js/src/scrollspy.js?v=5.1.4"></script>
+<script type="text/javascript" src="/js/src/post-details.js?v=5.1.4"></script>
+
+
+
+  
+
+
+  <script type="text/javascript" src="/js/src/bootstrap.js?v=5.1.4"></script>
+
+
+
+  
+
+
+  
+
+
+
+
+	
+
+
+
+
+
+  
+
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  <script type="text/javascript">
+    // Popup Window;
+    var isfetched = false;
+    var isXml = true;
+    // Search DB path;
+    var search_path = "search.xml";
+    if (search_path.length === 0) {
+      search_path = "search.xml";
+    } else if (/json$/i.test(search_path)) {
+      isXml = false;
+    }
+    var path = "/" + search_path;
+    // monitor main search box;
+
+    var onPopupClose = function (e) {
+      $('.popup').hide();
+      $('#local-search-input').val('');
+      $('.search-result-list').remove();
+      $('#no-result').remove();
+      $(".local-search-pop-overlay").remove();
+      $('body').css('overflow', '');
+    }
+
+    function proceedsearch() {
+      $("body")
+        .append('<div class="search-popup-overlay local-search-pop-overlay"></div>')
+        .css('overflow', 'hidden');
+      $('.search-popup-overlay').click(onPopupClose);
+      $('.popup').toggle();
+      var $localSearchInput = $('#local-search-input');
+      $localSearchInput.attr("autocapitalize", "none");
+      $localSearchInput.attr("autocorrect", "off");
+      $localSearchInput.focus();
+    }
+
+    // search function;
+    var searchFunc = function(path, search_id, content_id) {
+      'use strict';
+
+      // start loading animation
+      $("body")
+        .append('<div class="search-popup-overlay local-search-pop-overlay">' +
+          '<div id="search-loading-icon">' +
+          '<i class="fa fa-spinner fa-pulse fa-5x fa-fw"></i>' +
+          '</div>' +
+          '</div>')
+        .css('overflow', 'hidden');
+      $("#search-loading-icon").css('margin', '20% auto 0 auto').css('text-align', 'center');
+
+      $.ajax({
+        url: path,
+        dataType: isXml ? "xml" : "json",
+        async: true,
+        success: function(res) {
+          // get the contents from search data
+          isfetched = true;
+          $('.popup').detach().appendTo('.header-inner');
+          var datas = isXml ? $("entry", res).map(function() {
+            return {
+              title: $("title", this).text(),
+              content: $("content",this).text(),
+              url: $("url" , this).text()
+            };
+          }).get() : res;
+          var input = document.getElementById(search_id);
+          var resultContent = document.getElementById(content_id);
+          var inputEventFunction = function() {
+            var searchText = input.value.trim().toLowerCase();
+            var keywords = searchText.split(/[\s\-]+/);
+            if (keywords.length > 1) {
+              keywords.push(searchText);
+            }
+            var resultItems = [];
+            if (searchText.length > 0) {
+              // perform local searching
+              datas.forEach(function(data) {
+                var isMatch = false;
+                var hitCount = 0;
+                var searchTextCount = 0;
+                var title = data.title.trim();
+                var titleInLowerCase = title.toLowerCase();
+                var content = data.content.trim().replace(/<[^>]+>/g,"");
+                var contentInLowerCase = content.toLowerCase();
+                var articleUrl = decodeURIComponent(data.url);
+                var indexOfTitle = [];
+                var indexOfContent = [];
+                // only match articles with not empty titles
+                if(title != '') {
+                  keywords.forEach(function(keyword) {
+                    function getIndexByWord(word, text, caseSensitive) {
+                      var wordLen = word.length;
+                      if (wordLen === 0) {
+                        return [];
+                      }
+                      var startPosition = 0, position = [], index = [];
+                      if (!caseSensitive) {
+                        text = text.toLowerCase();
+                        word = word.toLowerCase();
+                      }
+                      while ((position = text.indexOf(word, startPosition)) > -1) {
+                        index.push({position: position, word: word});
+                        startPosition = position + wordLen;
+                      }
+                      return index;
+                    }
+
+                    indexOfTitle = indexOfTitle.concat(getIndexByWord(keyword, titleInLowerCase, false));
+                    indexOfContent = indexOfContent.concat(getIndexByWord(keyword, contentInLowerCase, false));
+                  });
+                  if (indexOfTitle.length > 0 || indexOfContent.length > 0) {
+                    isMatch = true;
+                    hitCount = indexOfTitle.length + indexOfContent.length;
+                  }
+                }
+
+                // show search results
+
+                if (isMatch) {
+                  // sort index by position of keyword
+
+                  [indexOfTitle, indexOfContent].forEach(function (index) {
+                    index.sort(function (itemLeft, itemRight) {
+                      if (itemRight.position !== itemLeft.position) {
+                        return itemRight.position - itemLeft.position;
+                      } else {
+                        return itemLeft.word.length - itemRight.word.length;
+                      }
+                    });
+                  });
+
+                  // merge hits into slices
+
+                  function mergeIntoSlice(text, start, end, index) {
+                    var item = index[index.length - 1];
+                    var position = item.position;
+                    var word = item.word;
+                    var hits = [];
+                    var searchTextCountInSlice = 0;
+                    while (position + word.length <= end && index.length != 0) {
+                      if (word === searchText) {
+                        searchTextCountInSlice++;
+                      }
+                      hits.push({position: position, length: word.length});
+                      var wordEnd = position + word.length;
+
+                      // move to next position of hit
+
+                      index.pop();
+                      while (index.length != 0) {
+                        item = index[index.length - 1];
+                        position = item.position;
+                        word = item.word;
+                        if (wordEnd > position) {
+                          index.pop();
+                        } else {
+                          break;
+                        }
+                      }
+                    }
+                    searchTextCount += searchTextCountInSlice;
+                    return {
+                      hits: hits,
+                      start: start,
+                      end: end,
+                      searchTextCount: searchTextCountInSlice
+                    };
+                  }
+
+                  var slicesOfTitle = [];
+                  if (indexOfTitle.length != 0) {
+                    slicesOfTitle.push(mergeIntoSlice(title, 0, title.length, indexOfTitle));
+                  }
+
+                  var slicesOfContent = [];
+                  while (indexOfContent.length != 0) {
+                    var item = indexOfContent[indexOfContent.length - 1];
+                    var position = item.position;
+                    var word = item.word;
+                    // cut out 100 characters
+                    var start = position - 20;
+                    var end = position + 80;
+                    if(start < 0){
+                      start = 0;
+                    }
+                    if (end < position + word.length) {
+                      end = position + word.length;
+                    }
+                    if(end > content.length){
+                      end = content.length;
+                    }
+                    slicesOfContent.push(mergeIntoSlice(content, start, end, indexOfContent));
+                  }
+
+                  // sort slices in content by search text's count and hits' count
+
+                  slicesOfContent.sort(function (sliceLeft, sliceRight) {
+                    if (sliceLeft.searchTextCount !== sliceRight.searchTextCount) {
+                      return sliceRight.searchTextCount - sliceLeft.searchTextCount;
+                    } else if (sliceLeft.hits.length !== sliceRight.hits.length) {
+                      return sliceRight.hits.length - sliceLeft.hits.length;
+                    } else {
+                      return sliceLeft.start - sliceRight.start;
+                    }
+                  });
+
+                  // select top N slices in content
+
+                  var upperBound = parseInt('1');
+                  if (upperBound >= 0) {
+                    slicesOfContent = slicesOfContent.slice(0, upperBound);
+                  }
+
+                  // highlight title and content
+
+                  function highlightKeyword(text, slice) {
+                    var result = '';
+                    var prevEnd = slice.start;
+                    slice.hits.forEach(function (hit) {
+                      result += text.substring(prevEnd, hit.position);
+                      var end = hit.position + hit.length;
+                      result += '<b class="search-keyword">' + text.substring(hit.position, end) + '</b>';
+                      prevEnd = end;
+                    });
+                    result += text.substring(prevEnd, slice.end);
+                    return result;
+                  }
+
+                  var resultItem = '';
+
+                  if (slicesOfTitle.length != 0) {
+                    resultItem += "<li><a href='" + articleUrl + "' class='search-result-title'>" + highlightKeyword(title, slicesOfTitle[0]) + "</a>";
+                  } else {
+                    resultItem += "<li><a href='" + articleUrl + "' class='search-result-title'>" + title + "</a>";
+                  }
+
+                  slicesOfContent.forEach(function (slice) {
+                    resultItem += "<a href='" + articleUrl + "'>" +
+                      "<p class=\"search-result\">" + highlightKeyword(content, slice) +
+                      "...</p>" + "</a>";
+                  });
+
+                  resultItem += "</li>";
+                  resultItems.push({
+                    item: resultItem,
+                    searchTextCount: searchTextCount,
+                    hitCount: hitCount,
+                    id: resultItems.length
+                  });
+                }
+              })
+            };
+            if (keywords.length === 1 && keywords[0] === "") {
+              resultContent.innerHTML = '<div id="no-result"><i class="fa fa-search fa-5x" /></div>'
+            } else if (resultItems.length === 0) {
+              resultContent.innerHTML = '<div id="no-result"><i class="fa fa-frown-o fa-5x" /></div>'
+            } else {
+              resultItems.sort(function (resultLeft, resultRight) {
+                if (resultLeft.searchTextCount !== resultRight.searchTextCount) {
+                  return resultRight.searchTextCount - resultLeft.searchTextCount;
+                } else if (resultLeft.hitCount !== resultRight.hitCount) {
+                  return resultRight.hitCount - resultLeft.hitCount;
+                } else {
+                  return resultRight.id - resultLeft.id;
+                }
+              });
+              var searchResultList = '<ul class=\"search-result-list\">';
+              resultItems.forEach(function (result) {
+                searchResultList += result.item;
+              })
+              searchResultList += "</ul>";
+              resultContent.innerHTML = searchResultList;
+            }
+          }
+
+          if ('auto' === 'auto') {
+            input.addEventListener('input', inputEventFunction);
+          } else {
+            $('.search-icon').click(inputEventFunction);
+            input.addEventListener('keypress', function (event) {
+              if (event.keyCode === 13) {
+                inputEventFunction();
+              }
+            });
+          }
+
+          // remove loading animation
+          $(".local-search-pop-overlay").remove();
+          $('body').css('overflow', '');
+
+          proceedsearch();
+        }
+      });
+    }
+
+    // handle and trigger popup window;
+    $('.popup-trigger').click(function(e) {
+      e.stopPropagation();
+      if (isfetched === false) {
+        searchFunc(path, 'local-search-input', 'local-search-result');
+      } else {
+        proceedsearch();
+      };
+    });
+
+    $('.popup-btn-close').click(onPopupClose);
+    $('.popup').click(function(e){
+      e.stopPropagation();
+    });
+    $(document).on('keyup', function (event) {
+      var shouldDismissSearchPopup = event.which === 27 &&
+        $('.search-popup').is(':visible');
+      if (shouldDismissSearchPopup) {
+        onPopupClose();
+      }
+    });
+  </script>
+
+
+
+
+
+  
+
+  
+
+  
+
+  
+  
+
+  
+
+  
+
+  
+
+</body>
+</html>
