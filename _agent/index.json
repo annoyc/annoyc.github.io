@@ -1,5 +1,16 @@
 [
   {
+    "title": "上下文快满了怎么压：别压一份已经压过的东西",
+    "date": "2026-11-05",
+    "url": "/2026/11/05/compaction-no-summary-of-summary/",
+    "tags": [
+      "Agent",
+      "Context Engineering",
+      "上下文压缩"
+    ],
+    "file": "2026-11-05-compaction-no-summary-of-summary.md"
+  },
+  {
     "title": "Agent 拆开看，就是一个 while 循环",
     "date": "2026-11-04",
     "url": "/2026/11/04/agent-is-a-while-loop/",
