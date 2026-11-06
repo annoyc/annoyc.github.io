@@ -1,5 +1,17 @@
 [
   {
+    "title": "工具调用超时了，别急着重试：它可能已经成功了",
+    "date": "2026-11-06",
+    "url": "/2026/11/06/tool-timeout-unknown-outcome/",
+    "tags": [
+      "Agent",
+      "工具调用",
+      "错误恢复",
+      "数问工作台"
+    ],
+    "file": "2026-11-06-tool-timeout-unknown-outcome.md"
+  },
+  {
     "title": "上下文快满了怎么压：别压一份已经压过的东西",
     "date": "2026-11-05",
     "url": "/2026/11/05/compaction-no-summary-of-summary/",

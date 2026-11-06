@@ -1,0 +1,1049 @@
+<!DOCTYPE html>
+
+
+
+  
+
+
+<html class="theme-next mist use-motion" lang="zh-Hans">
+<head>
+  <meta charset="UTF-8"/>
+<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+<meta name="theme-color" content="#222">
+
+
+
+
+
+
+
+
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+  
+  <link href="/lib/fancybox/source/jquery.fancybox.css?v=2.1.5" rel="stylesheet" type="text/css" />
+
+
+
+
+
+
+
+<link href="/lib/font-awesome/css/font-awesome.min.css?v=4.6.2" rel="stylesheet" type="text/css" />
+
+<link href="/css/main.css?v=5.1.4" rel="stylesheet" type="text/css" />
+
+
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png?v=5.1.4">
+
+
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png?v=5.1.4">
+
+
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png?v=5.1.4">
+
+
+  <link rel="mask-icon" href="/images/logo.svg?v=5.1.4" color="#222">
+
+
+
+
+
+  <meta name="keywords" content="Agent,工具调用,错误恢复,数问工作台," />
+
+
+
+
+
+
+
+
+
+
+<meta name="description" content="上一篇末尾我留了个没想清楚的问题：不可重复的工具，丢了结果就找不回来。这篇接着讲它的另一面：工具超时之后，结果是“未知”，不是“失败”。看看我自己的数据库 Agent 里是怎么处理这件事的，再对照 10 月底的一篇论文。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="工具调用超时了，别急着重试：它可能已经成功了">
+<meta property="og:url" content="http://yc-sky.top/2026/11/06/tool-timeout-unknown-outcome/index.html">
+<meta property="og:site_name" content="Yc的博客">
+<meta property="og:description" content="上一篇末尾我留了个没想清楚的问题：不可重复的工具，丢了结果就找不回来。这篇接着讲它的另一面：工具超时之后，结果是“未知”，不是“失败”。看看我自己的数据库 Agent 里是怎么处理这件事的，再对照 10 月底的一篇论文。">
+<meta property="article:published_time" content="2026-11-06T06:00:00.000Z">
+<meta property="article:modified_time" content="2026-11-06T06:00:00.000Z">
+<meta property="article:author" content="ycblue">
+<meta property="article:tag" content="Agent">
+<meta property="article:tag" content="工具调用">
+<meta property="article:tag" content="错误恢复">
+<meta property="article:tag" content="数问工作台">
+<meta name="twitter:card" content="summary">
+
+
+
+<script type="text/javascript" id="hexo.configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    root: '/',
+    scheme: 'Mist',
+    version: '5.1.4',
+    sidebar: {"position":"left","display":"hide","offset":12,"b2t":false,"scrollpercent":false,"onmobile":false},
+    fancybox: true,
+    tabs: true,
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}},
+    duoshuo: {
+      userId: '0',
+      author: '博主'
+    },
+    algolia: {
+      applicationID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    }
+  };
+</script>
+
+
+
+  <link rel="canonical" href="http://yc-sky.top/2026/11/06/tool-timeout-unknown-outcome/"/>
+
+
+
+
+
+  <title>工具调用超时了，别急着重试：它可能已经成功了 | Yc的博客</title>
+  
+
+
+
+
+
+
+
+
+<meta name="generator" content="Hexo 4.2.0"></head>
+
+<body itemscope itemtype="http://schema.org/WebPage" lang="zh-Hans">
+
+  
+  
+    
+  
+
+  <div class="container sidebar-position-left page-post-detail">
+    <div class="headband"></div>
+
+    <header id="header" class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-wrapper">
+  <div class="site-meta ">
+    
+
+    <div class="custom-logo-site-title">
+      <a href="/"  class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">Yc的博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+      
+        <p class="site-subtitle"></p>
+      
+  </div>
+
+  <div class="site-nav-toggle">
+    <button>
+      <span class="btn-bar"></span>
+      <span class="btn-bar"></span>
+      <span class="btn-bar"></span>
+    </button>
+  </div>
+</div>
+
+<nav class="site-nav">
+  
+
+  
+    <ul id="menu" class="menu">
+      
+        
+        <li class="menu-item menu-item-home">
+          <a href="/" rel="section">
+            
+              <i class="menu-item-icon fa fa-fw fa-home"></i> <br />
+            
+            首页
+          </a>
+        </li>
+      
+        
+        <li class="menu-item menu-item-agent">
+          <a href="/agent/" rel="section">
+              <i class="menu-item-icon fa fa-fw fa-lightbulb-o"></i> <br />
+            Agent
+          </a>
+        </li>
+        <li class="menu-item menu-item-tags">
+          <a href="/tags/" rel="section">
+            
+              <i class="menu-item-icon fa fa-fw fa-tags"></i> <br />
+            
+            标签
+          </a>
+        </li>
+      
+        
+        <li class="menu-item menu-item-archives">
+          <a href="/archives/" rel="section">
+            
+              <i class="menu-item-icon fa fa-fw fa-archive"></i> <br />
+            
+            归档
+          </a>
+        </li>
+      
+
+      
+        <li class="menu-item menu-item-search">
+          
+            <a href="javascript:;" class="popup-trigger">
+          
+            
+              <i class="menu-item-icon fa fa-search fa-fw"></i> <br />
+            
+            搜索
+          </a>
+        </li>
+      
+    </ul>
+  
+
+  
+    <div class="site-search">
+      
+  <div class="popup search-popup local-search-popup">
+  <div class="local-search-header clearfix">
+    <span class="search-icon">
+      <i class="fa fa-search"></i>
+    </span>
+    <span class="popup-btn-close">
+      <i class="fa fa-times-circle"></i>
+    </span>
+    <div class="local-search-input-wrapper">
+      <input autocomplete="off"
+             placeholder="搜索..." spellcheck="false"
+             type="text" id="local-search-input">
+    </div>
+  </div>
+  <div id="local-search-result"></div>
+</div>
+
+
+
+    </div>
+  
+</nav>
+
+
+
+ </div>
+    </header>
+
+    <main id="main" class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          <div id="content" class="content">
+            
+
+  <div id="posts" class="posts-expand">
+    
+
+  
+
+  
+  
+  
+
+  <article class="post post-type-normal" itemscope itemtype="http://schema.org/Article">
+  
+  
+  
+  <div class="post-block">
+    <link itemprop="mainEntityOfPage" href="http://yc-sky.top/2026/11/06/tool-timeout-unknown-outcome/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="name" content="ycblue">
+      <meta itemprop="description" content="">
+      <meta itemprop="image" content="https://cdn.jsdelivr.net/gh/yc2hang/cdn-assets/avatar/avatar.jpg">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="Yc的博客">
+    </span>
+
+    
+      <header class="post-header">
+
+        
+        
+          <h1 class="post-title" itemprop="name headline">工具调用超时了，别急着重试：它可能已经成功了</h1>
+        
+      </header>
+    
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+<p>上一篇最后我写了一段没想清楚的话：如果工具是下单、发消息这种不可重复的，“丢了结果再调一次”就不成立。这两天回头翻自己的项目，发现其实我早就在代码里碰到过同一类问题，只是当时没往“方法论”上想。</p>
+<a id="more"></a>
+<p>场景很具体：Agent 调一个工具，等了 60 秒，超时了。这时候你手里有什么？</p>
+<p>一个 <code>TimeoutError</code>。仅此而已。你不知道请求有没有到服务端，不知道服务端有没有执行，不知道执行了一半还是全做完了，只是响应没回来。</p>
+<p>写前端的人对这个不陌生。<code>fetch</code> 超时了，你不会直接假设后端没收到。支付按钮点了没反应，用户再点一次，这就是为什么支付接口要带幂等 key。Agent 的工具调用，本质上是同一类问题，只不过重试的发起者从用户的手指换成了一个会自己做决定的模型。</p>
+<h2 id="失败有两种"><a href="#失败有两种" class="headerlink" title="失败有两种"></a>失败有两种</h2>
+<p>我现在把工具调用的“没拿到结果”分成两类来看：</p>
+<ul>
+<li>明确失败：参数校验没过、返回了 4xx、连接都没建立起来。可以确定没有产生副作用，重试是安全的。</li>
+<li>结果未知：超时、连接中途断了、取消了请求。副作用可能已经发生。</li>
+</ul>
+<p>很多框架的重试逻辑只看“有没有抛异常”，把这两类混在一起。这是我之前自己写的 <code>withRetry</code> 也犯过的毛病。</p>
+<h2 id="我项目里的做法"><a href="#我项目里的做法" class="headerlink" title="我项目里的做法"></a>我项目里的做法</h2>
+<p><a href="https://github.com/annoyc/deepseek-db-chat" target="_blank" rel="noopener">数问工作台</a>是我做的一个自然语言查数据库的 Agent。工具层有一个统一的包装函数，每个工具都能配超时和重试次数。核心是这段（<code>src/core/tool/index.ts</code>，我删了无关的部分）：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br></pre></td><td class="code"><pre><span class="line">async function withRetries&lt;T&gt;(</span><br><span class="line">  fn: (signal: AbortSignal) =&gt; Promise&lt;T&gt;,</span><br><span class="line">  maxRetries: number,</span><br><span class="line">  timeoutMs?: number,</span><br><span class="line">  signal?: AbortSignal,</span><br><span class="line">): Promise&lt;T&gt; {</span><br><span class="line">  for (let attempt = 0; ; attempt++) {</span><br><span class="line">    signal?.throwIfAborted()</span><br><span class="line">    const scope = createAbortScope(signal, timeoutMs)</span><br><span class="line">    try {</span><br><span class="line">      return await abortable(fn(scope.signal), scope.signal)</span><br><span class="line">    } catch (error) {</span><br><span class="line">      signal?.throwIfAborted()</span><br><span class="line">      // A timed-out operation may still be finishing: never replay it automatically.</span><br><span class="line">      if (scope.signal.aborted || attempt &gt;= maxRetries) throw error</span><br><span class="line">    } finally {</span><br><span class="line">      scope.abort()</span><br><span class="line">      scope.dispose()</span><br><span class="line">    }</span><br><span class="line">  }</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p><a href="https://github.com/annoyc/deepseek-db-chat/blob/53912725cecacb4daa1525babd9ea70f91403572/src/core/tool/index.ts#L9-L30" target="_blank" rel="noopener">源码在这里</a>。</p>
+<p>关键是中间那个判断：<code>scope.signal.aborted</code> 为真就直接抛，不重试。每次尝试都会创建一个带截止时间的 <code>AbortScope</code>，超时到了，scope 的 signal 就被 abort，于是走到这个分支。也就是说，只有函数自己抛了错、而 signal 还没被 abort 的情况（比如参数问题、连接被拒），才会按 <code>retries</code> 重试。超时和取消一律不重试，不管 <code>retries</code> 配了几次。</p>
+<p>而且默认的 <code>retries</code> 是 0，要重试得工具自己声明。目前我项目里没有一个工具开了它。这是我有意的：默认保守，真有需要再显式打开。</p>
+<h2 id="为什么对数据库工具尤其重要"><a href="#为什么对数据库工具尤其重要" class="headerlink" title="为什么对数据库工具尤其重要"></a>为什么对数据库工具尤其重要</h2>
+<p>这个 Agent 的 SQL 执行默认只读，写操作要同时满足好几个条件（服务端开关、白名单、非 prod 环境），还要用户点确认。读操作超时了重试，最多是多花点时间。但一旦走到写操作，情况就不一样了。</p>
+<p><code>src/server/database.ts</code> 里执行 SQL 的地方有这样一段，请求被取消时的错误信息：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">const cancelled = new Error(prepared.isWrite</span><br><span class="line">  ? 'SQL 请求已取消；写操作可能已经提交，断开连接不代表回滚，请核对数据库结果'</span><br><span class="line">  : 'SQL 请求已取消，数据库连接已断开')</span><br></pre></td></tr></table></figure>
+<p><a href="https://github.com/annoyc/deepseek-db-chat/blob/53912725cecacb4daa1525babd9ea70f91403572/src/server/database.ts#L298-L304" target="_blank" rel="noopener">源码</a>。这句话是踩过一次想法上的坑之后加的：我一开始以为，连接一断，数据库自然会把没提交的事务回滚掉，所以取消是“干净”的。可对一条已经发到服务端、正在执行或者刚执行完的 <code>UPDATE</code>，客户端这边断开，并不能保证它被撤销。从客户端看到的只有“没收到结果”。</p>
+<p>所以读和写的提示不同。读：连接断了，重新问一遍就行。写：明确告诉用户（和模型），结果未知，请去核对。</p>
+<p>还有一点，我是后来才想到的：这条错误信息最终是会作为工具结果回到模型的上下文里的。模型读到“写操作可能已经提交”，就不太会自作主张地再发一遍同样的 <code>UPDATE</code>。信息写得准确，本身就是一层防护。如果只回一个 <code>timeout</code>，模型很可能理解成“失败了”，于是顺手重试。</p>
+<h2 id="对照一篇-10-月底的论文"><a href="#对照一篇-10-月底的论文" class="headerlink" title="对照一篇 10 月底的论文"></a>对照一篇 10 月底的论文</h2>
+<p>写之前我去搜了一下有没有人系统地研究这件事，找到一篇 10 月 30 日提交到 arXiv 的：<a href="https://arxiv.org/abs/2610.41453" target="_blank" rel="noopener">Evidence-Guided Recovery for AI Agents with Ambiguous Tool Outcomes and Partial Execution</a>（arXiv:2610.41453）。</p>
+<p>我只读了摘要和页面上的信息，没有逐页读完全文，所以这里只说我确认过的部分。它研究的正是这个场景：工具调用超时，动作可能失败、可能已提交、可能还在执行，同时流程里别的步骤已经完成了。作者把恢复建模成在“已批准的义务、服务方声明的能力、和与公开证据一致的状态”上的问题，另外有一个独立的“效果历史裁决器”，负责判断哪些恢复动作是被允许的。他们还强调一点：未知和移交（交给人处理）的结果要保持显式，保证只在服务方声明的能力范围内成立，不假装能做到任意第三方的“恰好执行一次”。</p>
+<p>实验部分有一组预先登记的对比：58 组配对任务，分布在 19 个任务族里，两个本地模型。用“规划建议”的方案认证完成了 30 个，用“证据提示”（把证据塞进 prompt 让模型自己判断）的只有 9 个，差 36.2 个百分点；提议的动作数是 272 对 399。这些是论文自己的合成任务，规模也不大，我不会拿它去推断真实系统里的数字。但方向我觉得和直觉一致：光把“可能已经成功”这件事写进 prompt，让模型自己想，不如在模型外面再加一层有明确规则的检查。</p>
+<p>我的项目没有做到论文那种程度。我这边只是在两处做了朴素的版本：超时不自动重试，写操作的未知结果如实说出来、交给人。</p>
+<h2 id="一个自己还没解决的地方"><a href="#一个自己还没解决的地方" class="headerlink" title="一个自己还没解决的地方"></a>一个自己还没解决的地方</h2>
+<p>现在我是靠“人去核对”兜底的。这在一个由人确认每条写操作的工具里还能接受，换成全自动的 Agent 就不够了。真正的办法是让写操作可查证：给每次写带一个请求 ID，超时后能反查“这个 ID 有没有生效”。数据库场景下要做这件事，得有一张操作记录表，或者把写操作限定成天然幂等的形式（比如 <code>UPDATE ... SET status = 'done' WHERE id = ?</code>，重复执行结果一样）。这块我还没做，先记在这里。</p>
+<h2 id="小结"><a href="#小结" class="headerlink" title="小结"></a>小结</h2>
+<p>工具调用的“没拿到结果”不等于“失败”。超时、取消、断连这几类，状态是未知的，默认别重试，至少对有副作用的工具是这样。把这个区别写进两个地方：重试逻辑里（超时直接放弃），和返回给模型的错误文案里（如实说“可能已经成功”）。</p>
+<p>参考：</p>
+<ul>
+<li><a href="https://arxiv.org/abs/2610.41453" target="_blank" rel="noopener">Evidence-Guided Recovery for AI Agents with Ambiguous Tool Outcomes and Partial Execution（arXiv:2610.41453）</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat" target="_blank" rel="noopener">数问工作台 deepseek-db-chat</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/53912725cecacb4daa1525babd9ea70f91403572/src/core/tool/index.ts#L9-L30" target="_blank" rel="noopener">src/core/tool/index.ts 的 withRetries</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/53912725cecacb4daa1525babd9ea70f91403572/src/server/database.ts#L298-L304" target="_blank" rel="noopener">src/server/database.ts 的取消处理</a></li>
+</ul>
+    </div>
+
+    <footer class="post-footer">
+        <div class="post-tags">
+          <a href="/agent/" rel="tag"># Agent</a>
+          <a href="/agent/" rel="tag"># 工具调用</a>
+          <a href="/agent/" rel="tag"># 错误恢复</a>
+          <a href="/agent/" rel="tag"># 数问工作台</a>
+        </div>
+        <div class="post-nav">
+          <div class="post-nav-next post-nav-item">
+              <a href="/2026/11/05/compaction-no-summary-of-summary/" rel="next" title="上下文快满了怎么压：别压一份已经压过的东西">
+                <i class="fa fa-chevron-left"></i> 上下文快满了怎么压：别压一份已经压过的东西
+              </a>
+          </div>
+          <span class="post-nav-divider"></span>
+          <div class="post-nav-prev post-nav-item">
+              
+          </div>
+        </div>
+    </footer>
+  </div>
+  
+  
+  
+  </article>
+
+
+
+    <div class="post-spread">
+      
+    </div>
+  </div>
+
+
+          </div>
+          
+
+
+          
+
+  
+
+
+
+        </div>
+        
+          
+  
+  <div class="sidebar-toggle">
+    <div class="sidebar-toggle-line-wrap">
+      <span class="sidebar-toggle-line sidebar-toggle-line-first"></span>
+      <span class="sidebar-toggle-line sidebar-toggle-line-middle"></span>
+      <span class="sidebar-toggle-line sidebar-toggle-line-last"></span>
+    </div>
+  </div>
+
+  <aside id="sidebar" class="sidebar">
+    
+    <div class="sidebar-inner">
+
+      
+
+      
+        <ul class="sidebar-nav motion-element">
+          <li class="sidebar-nav-toc sidebar-nav-active" data-target="post-toc-wrap">
+            文章目录
+          </li>
+          <li class="sidebar-nav-overview" data-target="site-overview-wrap">
+            站点概览
+          </li>
+        </ul>
+      
+
+      <section class="site-overview-wrap sidebar-panel">
+        <div class="site-overview">
+          <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+            
+              <img class="site-author-image" itemprop="image"
+                src="https://cdn.jsdelivr.net/gh/yc2hang/cdn-assets/avatar/avatar.jpg"
+                alt="ycblue" />
+            
+              <p class="site-author-name" itemprop="name">ycblue</p>
+              <p class="site-description motion-element" itemprop="description">stay hungry, stay foolish</p>
+          </div>
+
+          <nav class="site-state motion-element">
+
+            
+              <div class="site-state-item site-state-posts">
+              
+                <a href="/archives/%7C%7Carchive">
+              
+                  <span class="site-state-item-count">30</span>
+                  <span class="site-state-item-name">日志</span>
+                </a>
+              </div>
+            
+
+            
+              
+              
+              <div class="site-state-item site-state-categories">
+                <a href="/categories/index.html">
+                  <span class="site-state-item-count">3</span>
+                  <span class="site-state-item-name">分类</span>
+                </a>
+              </div>
+            
+
+            
+              
+              
+              <div class="site-state-item site-state-tags">
+                <a href="/tags/index.html">
+                  <span class="site-state-item-count">14</span>
+                  <span class="site-state-item-name">标签</span>
+                </a>
+              </div>
+            
+
+          </nav>
+
+          
+
+          
+            <div class="links-of-author motion-element">
+                
+                  <span class="links-of-author-item">
+                    <a href="https://github.com/yc2hang" target="_blank" title="GitHub">
+                      
+                        <i class="fa fa-fw fa-github"></i>GitHub</a>
+                  </span>
+                
+                  <span class="links-of-author-item">
+                    <a href="mailto:yc2hangycz@gmail.com" target="_blank" title="E-Mail">
+                      
+                        <i class="fa fa-fw fa-envelope"></i>E-Mail</a>
+                  </span>
+                
+            </div>
+          
+
+          
+          
+
+          
+          
+
+          
+
+        </div>
+      </section>
+
+      
+      <!--noindex-->
+        <section class="post-toc-wrap motion-element sidebar-panel sidebar-panel-active">
+          <div class="post-toc">
+
+            
+              
+            
+
+            
+              <div class="post-toc-content"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#失败有两种"><span class="nav-number">1.</span> <span class="nav-text">失败有两种</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#我项目里的做法"><span class="nav-number">2.</span> <span class="nav-text">我项目里的做法</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#为什么对数据库工具尤其重要"><span class="nav-number">3.</span> <span class="nav-text">为什么对数据库工具尤其重要</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#对照一篇-10-月底的论文"><span class="nav-number">4.</span> <span class="nav-text">对照一篇 10 月底的论文</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#一个自己还没解决的地方"><span class="nav-number">5.</span> <span class="nav-text">一个自己还没解决的地方</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#小结"><span class="nav-number">6.</span> <span class="nav-text">小结</span></a></li></ol></div>
+            
+
+          </div>
+        </section>
+      <!--/noindex-->
+      
+
+      
+
+    </div>
+  </aside>
+
+
+        
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="footer-inner">
+        <div class="copyright">&copy; <span itemprop="copyrightYear">2025</span>
+  <span class="with-love">
+    <i class="fa fa-heart"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">ycblue</span>
+
+  
+</div>
+
+
+  <div class="powered-by">由 <a class="theme-link" target="_blank" href="https://hexo.io">Hexo</a> 强力驱动</div>
+
+
+
+  <span class="post-meta-divider">|</span>
+
+
+
+  <div class="theme-info">主题 &mdash; <a class="theme-link" target="_blank" href="https://github.com/iissnan/hexo-theme-next">NexT.Mist</a> v5.1.4</div>
+
+
+
+
+        
+
+
+
+
+
+
+
+        
+      </div>
+    </footer>
+
+    
+      <div class="back-to-top">
+        <i class="fa fa-arrow-up"></i>
+        
+      </div>
+    
+
+    
+
+  </div>
+
+  
+
+<script type="text/javascript">
+  if (Object.prototype.toString.call(window.Promise) !== '[object Function]') {
+    window.Promise = null;
+  }
+</script>
+
+
+
+
+
+
+
+
+
+  
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+  
+  
+    <script type="text/javascript" src="/lib/jquery/index.js?v=2.1.3"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/fastclick/lib/fastclick.min.js?v=1.0.6"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/jquery_lazyload/jquery.lazyload.js?v=1.9.7"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/velocity/velocity.min.js?v=1.2.1"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/velocity/velocity.ui.min.js?v=1.2.1"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/fancybox/source/jquery.fancybox.pack.js?v=2.1.5"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/canvas-nest/canvas-nest.min.js"></script>
+  
+
+
+  
+
+
+  <script type="text/javascript" src="/js/src/utils.js?v=5.1.4"></script>
+
+  <script type="text/javascript" src="/js/src/motion.js?v=5.1.4"></script>
+
+
+
+  
+  
+
+  
+  <script type="text/javascript" src="/js/src/scrollspy.js?v=5.1.4"></script>
+<script type="text/javascript" src="/js/src/post-details.js?v=5.1.4"></script>
+
+
+
+  
+
+
+  <script type="text/javascript" src="/js/src/bootstrap.js?v=5.1.4"></script>
+
+
+
+  
+
+
+  
+
+
+
+
+	
+
+
+
+
+
+  
+
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  <script type="text/javascript">
+    // Popup Window;
+    var isfetched = false;
+    var isXml = true;
+    // Search DB path;
+    var search_path = "search.xml";
+    if (search_path.length === 0) {
+      search_path = "search.xml";
+    } else if (/json$/i.test(search_path)) {
+      isXml = false;
+    }
+    var path = "/" + search_path;
+    // monitor main search box;
+
+    var onPopupClose = function (e) {
+      $('.popup').hide();
+      $('#local-search-input').val('');
+      $('.search-result-list').remove();
+      $('#no-result').remove();
+      $(".local-search-pop-overlay").remove();
+      $('body').css('overflow', '');
+    }
+
+    function proceedsearch() {
+      $("body")
+        .append('<div class="search-popup-overlay local-search-pop-overlay"></div>')
+        .css('overflow', 'hidden');
+      $('.search-popup-overlay').click(onPopupClose);
+      $('.popup').toggle();
+      var $localSearchInput = $('#local-search-input');
+      $localSearchInput.attr("autocapitalize", "none");
+      $localSearchInput.attr("autocorrect", "off");
+      $localSearchInput.focus();
+    }
+
+    // search function;
+    var searchFunc = function(path, search_id, content_id) {
+      'use strict';
+
+      // start loading animation
+      $("body")
+        .append('<div class="search-popup-overlay local-search-pop-overlay">' +
+          '<div id="search-loading-icon">' +
+          '<i class="fa fa-spinner fa-pulse fa-5x fa-fw"></i>' +
+          '</div>' +
+          '</div>')
+        .css('overflow', 'hidden');
+      $("#search-loading-icon").css('margin', '20% auto 0 auto').css('text-align', 'center');
+
+      $.ajax({
+        url: path,
+        dataType: isXml ? "xml" : "json",
+        async: true,
+        success: function(res) {
+          // get the contents from search data
+          isfetched = true;
+          $('.popup').detach().appendTo('.header-inner');
+          var datas = isXml ? $("entry", res).map(function() {
+            return {
+              title: $("title", this).text(),
+              content: $("content",this).text(),
+              url: $("url" , this).text()
+            };
+          }).get() : res;
+          var input = document.getElementById(search_id);
+          var resultContent = document.getElementById(content_id);
+          var inputEventFunction = function() {
+            var searchText = input.value.trim().toLowerCase();
+            var keywords = searchText.split(/[\s\-]+/);
+            if (keywords.length > 1) {
+              keywords.push(searchText);
+            }
+            var resultItems = [];
+            if (searchText.length > 0) {
+              // perform local searching
+              datas.forEach(function(data) {
+                var isMatch = false;
+                var hitCount = 0;
+                var searchTextCount = 0;
+                var title = data.title.trim();
+                var titleInLowerCase = title.toLowerCase();
+                var content = data.content.trim().replace(/<[^>]+>/g,"");
+                var contentInLowerCase = content.toLowerCase();
+                var articleUrl = decodeURIComponent(data.url);
+                var indexOfTitle = [];
+                var indexOfContent = [];
+                // only match articles with not empty titles
+                if(title != '') {
+                  keywords.forEach(function(keyword) {
+                    function getIndexByWord(word, text, caseSensitive) {
+                      var wordLen = word.length;
+                      if (wordLen === 0) {
+                        return [];
+                      }
+                      var startPosition = 0, position = [], index = [];
+                      if (!caseSensitive) {
+                        text = text.toLowerCase();
+                        word = word.toLowerCase();
+                      }
+                      while ((position = text.indexOf(word, startPosition)) > -1) {
+                        index.push({position: position, word: word});
+                        startPosition = position + wordLen;
+                      }
+                      return index;
+                    }
+
+                    indexOfTitle = indexOfTitle.concat(getIndexByWord(keyword, titleInLowerCase, false));
+                    indexOfContent = indexOfContent.concat(getIndexByWord(keyword, contentInLowerCase, false));
+                  });
+                  if (indexOfTitle.length > 0 || indexOfContent.length > 0) {
+                    isMatch = true;
+                    hitCount = indexOfTitle.length + indexOfContent.length;
+                  }
+                }
+
+                // show search results
+
+                if (isMatch) {
+                  // sort index by position of keyword
+
+                  [indexOfTitle, indexOfContent].forEach(function (index) {
+                    index.sort(function (itemLeft, itemRight) {
+                      if (itemRight.position !== itemLeft.position) {
+                        return itemRight.position - itemLeft.position;
+                      } else {
+                        return itemLeft.word.length - itemRight.word.length;
+                      }
+                    });
+                  });
+
+                  // merge hits into slices
+
+                  function mergeIntoSlice(text, start, end, index) {
+                    var item = index[index.length - 1];
+                    var position = item.position;
+                    var word = item.word;
+                    var hits = [];
+                    var searchTextCountInSlice = 0;
+                    while (position + word.length <= end && index.length != 0) {
+                      if (word === searchText) {
+                        searchTextCountInSlice++;
+                      }
+                      hits.push({position: position, length: word.length});
+                      var wordEnd = position + word.length;
+
+                      // move to next position of hit
+
+                      index.pop();
+                      while (index.length != 0) {
+                        item = index[index.length - 1];
+                        position = item.position;
+                        word = item.word;
+                        if (wordEnd > position) {
+                          index.pop();
+                        } else {
+                          break;
+                        }
+                      }
+                    }
+                    searchTextCount += searchTextCountInSlice;
+                    return {
+                      hits: hits,
+                      start: start,
+                      end: end,
+                      searchTextCount: searchTextCountInSlice
+                    };
+                  }
+
+                  var slicesOfTitle = [];
+                  if (indexOfTitle.length != 0) {
+                    slicesOfTitle.push(mergeIntoSlice(title, 0, title.length, indexOfTitle));
+                  }
+
+                  var slicesOfContent = [];
+                  while (indexOfContent.length != 0) {
+                    var item = indexOfContent[indexOfContent.length - 1];
+                    var position = item.position;
+                    var word = item.word;
+                    // cut out 100 characters
+                    var start = position - 20;
+                    var end = position + 80;
+                    if(start < 0){
+                      start = 0;
+                    }
+                    if (end < position + word.length) {
+                      end = position + word.length;
+                    }
+                    if(end > content.length){
+                      end = content.length;
+                    }
+                    slicesOfContent.push(mergeIntoSlice(content, start, end, indexOfContent));
+                  }
+
+                  // sort slices in content by search text's count and hits' count
+
+                  slicesOfContent.sort(function (sliceLeft, sliceRight) {
+                    if (sliceLeft.searchTextCount !== sliceRight.searchTextCount) {
+                      return sliceRight.searchTextCount - sliceLeft.searchTextCount;
+                    } else if (sliceLeft.hits.length !== sliceRight.hits.length) {
+                      return sliceRight.hits.length - sliceLeft.hits.length;
+                    } else {
+                      return sliceLeft.start - sliceRight.start;
+                    }
+                  });
+
+                  // select top N slices in content
+
+                  var upperBound = parseInt('1');
+                  if (upperBound >= 0) {
+                    slicesOfContent = slicesOfContent.slice(0, upperBound);
+                  }
+
+                  // highlight title and content
+
+                  function highlightKeyword(text, slice) {
+                    var result = '';
+                    var prevEnd = slice.start;
+                    slice.hits.forEach(function (hit) {
+                      result += text.substring(prevEnd, hit.position);
+                      var end = hit.position + hit.length;
+                      result += '<b class="search-keyword">' + text.substring(hit.position, end) + '</b>';
+                      prevEnd = end;
+                    });
+                    result += text.substring(prevEnd, slice.end);
+                    return result;
+                  }
+
+                  var resultItem = '';
+
+                  if (slicesOfTitle.length != 0) {
+                    resultItem += "<li><a href='" + articleUrl + "' class='search-result-title'>" + highlightKeyword(title, slicesOfTitle[0]) + "</a>";
+                  } else {
+                    resultItem += "<li><a href='" + articleUrl + "' class='search-result-title'>" + title + "</a>";
+                  }
+
+                  slicesOfContent.forEach(function (slice) {
+                    resultItem += "<a href='" + articleUrl + "'>" +
+                      "<p class=\"search-result\">" + highlightKeyword(content, slice) +
+                      "...</p>" + "</a>";
+                  });
+
+                  resultItem += "</li>";
+                  resultItems.push({
+                    item: resultItem,
+                    searchTextCount: searchTextCount,
+                    hitCount: hitCount,
+                    id: resultItems.length
+                  });
+                }
+              })
+            };
+            if (keywords.length === 1 && keywords[0] === "") {
+              resultContent.innerHTML = '<div id="no-result"><i class="fa fa-search fa-5x" /></div>'
+            } else if (resultItems.length === 0) {
+              resultContent.innerHTML = '<div id="no-result"><i class="fa fa-frown-o fa-5x" /></div>'
+            } else {
+              resultItems.sort(function (resultLeft, resultRight) {
+                if (resultLeft.searchTextCount !== resultRight.searchTextCount) {
+                  return resultRight.searchTextCount - resultLeft.searchTextCount;
+                } else if (resultLeft.hitCount !== resultRight.hitCount) {
+                  return resultRight.hitCount - resultLeft.hitCount;
+                } else {
+                  return resultRight.id - resultLeft.id;
+                }
+              });
+              var searchResultList = '<ul class=\"search-result-list\">';
+              resultItems.forEach(function (result) {
+                searchResultList += result.item;
+              })
+              searchResultList += "</ul>";
+              resultContent.innerHTML = searchResultList;
+            }
+          }
+
+          if ('auto' === 'auto') {
+            input.addEventListener('input', inputEventFunction);
+          } else {
+            $('.search-icon').click(inputEventFunction);
+            input.addEventListener('keypress', function (event) {
+              if (event.keyCode === 13) {
+                inputEventFunction();
+              }
+            });
+          }
+
+          // remove loading animation
+          $(".local-search-pop-overlay").remove();
+          $('body').css('overflow', '');
+
+          proceedsearch();
+        }
+      });
+    }
+
+    // handle and trigger popup window;
+    $('.popup-trigger').click(function(e) {
+      e.stopPropagation();
+      if (isfetched === false) {
+        searchFunc(path, 'local-search-input', 'local-search-result');
+      } else {
+        proceedsearch();
+      };
+    });
+
+    $('.popup-btn-close').click(onPopupClose);
+    $('.popup').click(function(e){
+      e.stopPropagation();
+    });
+    $(document).on('keyup', function (event) {
+      var shouldDismissSearchPopup = event.which === 27 &&
+        $('.search-popup').is(':visible');
+      if (shouldDismissSearchPopup) {
+        onPopupClose();
+      }
+    });
+  </script>
+
+
+
+
+
+  
+
+  
+
+  
+
+  
+  
+
+  
+
+  
+
+  
+
+</body>
+</html>
