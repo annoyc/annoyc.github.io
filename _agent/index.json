@@ -1,5 +1,17 @@
 [
   {
+    "title": "工具太多、表太多，别全塞给模型：先缩小候选，但要留一条退路",
+    "date": "2026-11-07",
+    "url": "/2026/11/07/candidate-narrowing-keep-escape-hatch/",
+    "tags": [
+      "Agent",
+      "工具选择",
+      "Schema 裁剪",
+      "数问工作台"
+    ],
+    "file": "2026-11-07-candidate-narrowing-keep-escape-hatch.md"
+  },
+  {
     "title": "工具调用超时了，别急着重试：它可能已经成功了",
     "date": "2026-11-06",
     "url": "/2026/11/06/tool-timeout-unknown-outcome/",

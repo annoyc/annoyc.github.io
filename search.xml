@@ -2,6 +2,65 @@
 <search>
 <!--agent-daily:start-->
   <entry>
+    <title>工具太多、表太多，别全塞给模型：先缩小候选，但要留一条退路</title>
+    <url>/2026/11/07/candidate-narrowing-keep-escape-hatch/</url>
+    <content><![CDATA[<p>这篇起因是看论文时撞上的，看完发现自己的项目里正好有个土味版本。</p>
+<a id="more"></a>
+<p>先说一个场景。你给 Agent 接了几个 MCP server，每个 server 往外暴露十来个工具。接到第五个的时候，工具定义本身就占了好几万 token，用户还没开口。我在前端做过类似的事：一个页面一次性把全站所有组件的配置都加载进来，只因为“万一用到呢”。</p>
+<h2 id="论文怎么说"><a href="#论文怎么说" class="headerlink" title="论文怎么说"></a>论文怎么说</h2>
+<p>10 月 16 日有篇 arXiv 论文，<a href="https://arxiv.org/abs/2610.23707" target="_blank" rel="noopener">Tool Recommendation for Multi-Step Agents: Finding Every Tool a Task Needs</a>（arXiv:2610.23707）。它讲的是一个已经上线的网关：背后大约 8200 个工具，定义加起来比测试用的模型的上下文窗口还长，没法列给 Agent 看。</p>
+<p>做法是只暴露三个固定的工具给 Agent：SelectTools 接收自然语言的任务描述，返回排名前五的工具定义（带完整参数 schema）；UseTool 去执行选出来的那个；ListApps 告诉 Agent 网关后面有哪些应用、用户连没连上。也就是说，Agent 不是“看到所有工具再挑”，而是“先描述我要干什么，再拿到几个候选”。</p>
+<p>几个数字，都是论文摘要和正文里写的：在公开检索基准 ToolRet 上，让所需工具全部进前十的比例比 BM25 高 57%；在多步骤的编程 Agent 会话里，和固定的 100 个工具列表比，输入 token 在 Codex 下少 17%，在 Claude Code 下少 40%；14 次运行总费用都降了，最多降 40%，任务完成情况没变。这是他们自己的部署和测试，我没法复现，数字只当参考。</p>
+<p>我觉得更有价值的是它没有一味说检索好。论文里明确写了：工具少、任务短的时候，静态列表更合适。成本模型算出来，工具数低于大约 25 到 28 个，或者每次工具调用平均搜索次数超过约 0.63 次，静态列表更划算。在 8 到 37 个工具的短查询里，用检索反而让输入中位数涨了 22%，因为每次搜索都要多花一轮。</p>
+<p>这和前端的直觉一致：数据少的时候别上虚拟列表。</p>
+<p>另外一篇 9 月的 <a href="https://arxiv.org/abs/2609.22218" target="_blank" rel="noopener">Toollery</a>（arXiv:2609.22218，EMNLP 2026）思路类似：给每个工具预先生成一批“用户可能怎么说”的查询，建索引，线上先把候选压到 top-K 再让模型做最后的选择。它的摘要里自己也写了，收益取决于负载覆盖面和服务商的缓存情况。这个“缓存”我后面会回到。</p>
+<h2 id="我项目里的同款选表"><a href="#我项目里的同款选表" class="headerlink" title="我项目里的同款：选表"></a>我项目里的同款：选表</h2>
+<p><a href="https://github.com/annoyc/deepseek-db-chat" target="_blank" rel="noopener">数问工作台</a>是我的自然语言查数据库项目。数据库的“工具”不是函数，而是表：一个库有两三百张表，模型要写对 SQL，就得知道有哪些表。如果把整个库的结构都塞进去，和塞几千个工具定义是一个问题。</p>
+<p>我写了个模块 <code>src/server/schema-subsetting.ts</code>，数据库表数量不超过 40 张就原样全给；超过了才裁。入口是这样的：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br></pre></td><td class="code"><pre><span class="line">const MAX_OVERVIEW_TABLES = 40</span><br><span class="line">// ...</span><br><span class="line">export function subsetTables(</span><br><span class="line">  tables: TableMeta[],</span><br><span class="line">  userQuery: string,</span><br><span class="line">  fkEdges: ForeignKeyEdge[],</span><br><span class="line">  seedTables?: string[],</span><br><span class="line">): SubsetResult {</span><br><span class="line">  if (tables.length &lt;= MAX_OVERVIEW_TABLES) {</span><br><span class="line">    return { tables, hiddenCount: 0, totalCount: tables.length }</span><br><span class="line">  }</span><br><span class="line">  // ...</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p><a href="https://github.com/annoyc/deepseek-db-chat/blob/d7a9caf477daa1056e32df8763542774c91abcae/src/server/schema-subsetting.ts#L10-L82" target="_blank" rel="noopener">源码</a>。第一个 <code>if</code> 就是论文说的那条：小库不裁。</p>
+<p>打分特别朴素，就是用户问题的分词和表名、表注释的分词做重叠：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br></pre></td><td class="code"><pre><span class="line">function scoreTable(table: TableMeta, queryTokens: string[]): number {</span><br><span class="line">  if (queryTokens.length === 0) return 0</span><br><span class="line"></span><br><span class="line">  const nameTokens = tokenize(table.name)</span><br><span class="line">  const commentTokens = tokenize(table.comment)</span><br><span class="line">  const allTableTokens = new Set([...nameTokens, ...commentTokens])</span><br><span class="line"></span><br><span class="line">  let matchCount = 0</span><br><span class="line">  for (const qt of queryTokens) {</span><br><span class="line">    for (const tt of allTableTokens) {</span><br><span class="line">      if (tt.includes(qt) || qt.includes(tt)) {</span><br><span class="line">        matchCount++</span><br><span class="line">        break</span><br><span class="line">      }</span><br><span class="line">    }</span><br><span class="line">  }</span><br><span class="line"></span><br><span class="line">  return matchCount / queryTokens.length</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p><a href="https://github.com/annoyc/deepseek-db-chat/blob/d7a9caf477daa1056e32df8763542774c91abcae/src/server/schema-subsetting.ts#L50-L68" target="_blank" rel="noopener">源码</a>。分词也是土办法：英文按下划线、驼峰切开，中文直接一个字一个字切。没有向量，没有 embedding，没有 BM25。所以它的准确率肯定比不上论文里那种系统，我也没测过一个具体数字，这里不编。</p>
+<p>这种做法的好处很实际：表名和表注释通常就是用户会用的词，比如“订单”“用户”；而且它不需要额外的模型调用，不增加延迟。</p>
+<h2 id="只打分不够补了三件事"><a href="#只打分不够补了三件事" class="headerlink" title="只打分不够，补了三件事"></a>只打分不够，补了三件事</h2>
+<p>关键词重叠有明显的漏洞：用户说“上个月卖了多少”，表叫 <code>t_biz_order_fact</code>，没有一个字对得上。所以打分之外还有三层兜底，都在同一个函数里：</p>
+<ol>
+<li>种子表。前面有一个意图分类器（<a href="https://github.com/annoyc/deepseek-db-chat/blob/d7a9caf477daa1056e32df8763542774c91abcae/src/server/intent-router.ts" target="_blank" rel="noopener"><code>intent-router.ts</code></a>），它能根据问题猜出“可能涉及哪些表”，这些表不管打分多少都强制放进去（代码里的 Phase 0）。这相当于让模型来做第一轮召回，关键词打分只是补充。</li>
+<li>外键扩展。选中的表，沿着外键往外走一跳，把直接 JOIN 的表也带上。预算上留了一部分给这个，大概四分之一。没有这条的话，会出现只选中了 <code>orders</code>、却缺它要 JOIN 的用户表的情况，模型拿不到那张表，就只能猜列名。</li>
+<li>补位。名额还有剩的话，按行数从多到少补，我的假设是行数多的表更可能是核心业务表。</li>
+</ol>
+<p>三件事的顺序和细节我就不全贴了，想看直接翻源码。</p>
+<h2 id="退路比打分本身更重要"><a href="#退路比打分本身更重要" class="headerlink" title="退路比打分本身更重要"></a>退路比打分本身更重要</h2>
+<p>说到这，其实最重要的不是上面这些，而是下面这一小段。在 <code>src/server/database.ts</code> 里，拼完概览之后：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">if (hiddenCount &gt; 0) {</span><br><span class="line">  overview += `\n注意：由于表数量较多，以上仅展示与问题可能相关的 ${visibleTables.length} 张表。如果所需的表未在上方列出，请调用 list_tables 查看完整列表，再对具体表调用 get_table_schema。`</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p><a href="https://github.com/annoyc/deepseek-db-chat/blob/d7a9caf477daa1056e32df8763542774c91abcae/src/server/database.ts#L709-L711" target="_blank" rel="noopener">源码</a>。同一文件里，概览开头还会写一句“共 N 张基础表……另有 M 张可通过 list_tables 查看完整列表”。</p>
+<p>也就是说，裁剪是有损的，而我让这种损失对模型是可见的：它知道自己看到的是子集，知道总数，也知道怎么看全部。打分漏掉了 <code>t_biz_order_fact</code>，模型还有机会自己去调 <code>list_tables</code> 找。</p>
+<p>这和论文里的设计思路接近：候选只是入口，Agent 手里始终有能继续查找的工具（ListApps 之类）。如果裁剪之后模型根本不知道有东西被藏起来了，它就只会在残缺的信息里硬凑，这比一开始给全量还糟。</p>
+<p>最坏的情形我能想象得到：只返回裁剪后的表、不说还有多少没展示，模型遇到被漏掉的表，就会很笃定地说“库里没有这个表”。</p>
+<h2 id="缓存也要算进去"><a href="#缓存也要算进去" class="headerlink" title="缓存也要算进去"></a>缓存也要算进去</h2>
+<p>Toollery 的摘要里提了缓存，我之前没想过这一点，是写这篇时才回头看自己的代码。我用的 DeepSeek 有前缀缓存，消息的前面一段完全一样就能便宜地复用。如果每个问题的表概览都不同，那这一段就没法复用了。</p>
+<p>我现在的处理是：概览在一次对话里只算一次，工具里有个 <code>overviewCache</code>，同一轮里重复调用直接返回缓存的字符串。但跨问题它还是会变，因为裁剪依赖用户当前的问题。这笔账我没认真算过，省下的 token 和丢掉的缓存命中到底谁多，我不确定。小库不裁的那个 40 张的阈值，也是拍脑袋定的。</p>
+<h2 id="小结"><a href="#小结" class="headerlink" title="小结"></a>小结</h2>
+<p>候选太多，就先缩小再让模型选，缩小的办法可以很粗糙，粗糙到关键词匹配也行。但有三条我觉得不能省：小规模时别裁；裁剪的结果要让模型知道“这是子集”；给它一条能看全部的路。</p>
+<p>参考：</p>
+<ul>
+<li><a href="https://arxiv.org/abs/2610.23707" target="_blank" rel="noopener">Tool Recommendation for Multi-Step Agents: Finding Every Tool a Task Needs（arXiv:2610.23707）</a></li>
+<li><a href="https://arxiv.org/abs/2609.22218" target="_blank" rel="noopener">Toollery: Scaling LLM Agents to Thousands of Skills and Tools（arXiv:2609.22218）</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat" target="_blank" rel="noopener">数问工作台 deepseek-db-chat</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/d7a9caf477daa1056e32df8763542774c91abcae/src/server/schema-subsetting.ts" target="_blank" rel="noopener">src/server/schema-subsetting.ts</a></li>
+</ul>]]></content>
+    <categories>
+      <category>Agent</category>
+    </categories>
+    <tags>
+      <tag>Agent</tag>
+      <tag>工具选择</tag>
+      <tag>Schema 裁剪</tag>
+      <tag>数问工作台</tag>
+    </tags>
+  </entry>
+  <entry>
     <title>工具调用超时了，别急着重试：它可能已经成功了</title>
     <url>/2026/11/06/tool-timeout-unknown-outcome/</url>
     <content><![CDATA[<p>上一篇最后我写了一段没想清楚的话：如果工具是下单、发消息这种不可重复的，“丢了结果再调一次”就不成立。这两天回头翻自己的项目，发现其实我早就在代码里碰到过同一类问题，只是当时没往“方法论”上想。</p>
