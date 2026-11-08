@@ -2,6 +2,66 @@
 <search>
 <!--agent-daily:start-->
   <entry>
+    <title>权限别只在前面拦：用户点了“确认”之后，执行入口还要再查一遍</title>
+    <url>/2026/11/08/authorize-at-execution-boundary/</url>
+    <content><![CDATA[<p>前几篇写的都是怎么让 Agent 更好用，这篇换个方向，讲一件偏防守的事：权限检查放在哪一层。</p>
+<a id="more"></a>
+<p>我在前端写过很多“按钮置灰”。管理员才能删除，非管理员的按钮就 disabled。后来被后端同事教育过：前端的置灰只是体验，真正的权限必须在接口里再查一遍，因为请求可以不经过你的按钮直接发出来。</p>
+<p>Agent 里是同一个道理，只是“不可信的前端”多了一个：模型。</p>
+<h2 id="论文怎么说"><a href="#论文怎么说" class="headerlink" title="论文怎么说"></a>论文怎么说</h2>
+<p>10 月 31 日挂出的一篇 arXiv 论文，<a href="https://arxiv.org/abs/2611.00729" target="_blank" rel="noopener">AgentCap: Capability-Based Runtime Authorization for Secure LLM Agent Execution</a>（arXiv:2611.00729，NeurIPS 2026 Agents in the Wild 工作坊，非存档）。它的出发点是：提示词过滤和模型对齐都是概率性的，而且发生在攻击者要操纵的那个推理过程里。一条注入进来的指令可以说服一个本来就有合法凭证的 Agent，所以防线不能只在模型脑子里。</p>
+<p>它的做法是在模型和工具之间放一个确定性的授权层。论文把核心约束写成一句话：任何模型产生的工具调用，没有独立可验证的授权，就到不了 MCP server。具体是一个 MCP 包装层加一个授权网关：Agent 提一个调用，同时声明意图，策略引擎按规则检查（工具在不在目录里、敏感参数的来源是否可信、前置步骤做没做、有没有互斥的权限组合），通过了发一个短期的、带调用次数预算的签名令牌，网关在转发给工具之前验证它。</p>
+<p>数字我从原文核对过，都是论文自己的测试：AgentDojo 上，GPT-4o 的攻击成功率从 45.63% 降到 5.09%，GPT-5.4 从 33.23% 降到 0.00%；InjecAgent 上分别从 23.24% 降到 8.63%、从 11.95% 降到 0.00%。验证一次令牌的中位耗时是 79.9 微秒，几乎可以忽略。</p>
+<p>代价它也老实写了：没攻击的正常任务里，可用性掉了 3.1 到 11.7 个点，原因是拒绝得比较保守，缺前置步骤、权限组合冲突的调用直接被拒。所以这不是白送的，规则越严，误伤越多。</p>
+<p>我没有它那么重的令牌体系。但“授权决定放在模型之外、放在执行的那一刻”这条，我在自己的项目里正好有个很朴素的版本。</p>
+<h2 id="数问工作台里的四道关"><a href="#数问工作台里的四道关" class="headerlink" title="数问工作台里的四道关"></a>数问工作台里的四道关</h2>
+<p><a href="https://github.com/annoyc/deepseek-db-chat" target="_blank" rel="noopener">数问工作台</a>是我的自然语言查数据库项目。模型生成 SQL，用户在界面上看过、点“确认”，才真正执行。默认只读，写入要服务器显式开。</p>
+<p>一开始我以为有“用户确认”这一步就够了。后来想明白，用户确认的是“这条 SQL 看起来对”，不是“这条 SQL 有权限执行”。用户看不出一条 SQL 里有没有 <code>LOAD_FILE()</code>，也不会去检查浏览器发给服务器的 <code>sqlPermission</code> 是不是被人改成了 <code>write</code>。</p>
+<p>所以同一件事被查了四次。</p>
+<p>第一次，一轮对话开始时，服务端用连接信息重新算出这次到底允许什么权限：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">const decryptedConnection = resolveDatabaseConnection(data.connection)</span><br><span class="line">const effectiveSqlPermission = resolveSqlPermission(decryptedConnection, data.sqlPermission)</span><br></pre></td></tr></table></figure>
+<p>第二次，模型调用 <code>execute_sql</code> 工具时，工具函数里先过一遍校验，不通过就把原因当成工具结果还给模型，让它自己改：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">const validation = validateSql(sql, sqlPermission)</span><br><span class="line">if (!validation.allowed) {</span><br><span class="line">  const errorMsg = `SQL 被安全策略拦截: ${validation.reason}。当前模式仅允许: ${allowedLabel}。`</span><br><span class="line">  pushError('execute_sql', new Error(errorMsg))</span><br><span class="line">  return errorMsg</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p>这一步是给模型看的，省得一条注定被拒的 SQL 白白让用户确认。</p>
+<p>第三次，用户点确认，请求打到 <code>confirm-sql.ts</code>。注意这里不信任前一次算出来的权限，重新算：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">const decryptedConnection = resolveDatabaseConnection(data.connection)</span><br><span class="line">const permission = resolveSqlPermission(decryptedConnection, data.sqlPermission)</span><br><span class="line">const validation = validateSql(data.sql, permission)</span><br><span class="line">if (!validation.allowed) {</span><br><span class="line">  return { success: false, error: validation.reason || 'SQL 校验失败' }</span><br><span class="line">}</span><br><span class="line">const result = await executeQuery(decryptedConnection, data.sql, permission, getRequest().signal)</span><br></pre></td></tr></table></figure>
+<p><a href="https://github.com/annoyc/deepseek-db-chat/blob/d7a9caf477daa1056e32df8763542774c91abcae/src/server/functions/confirm-sql.ts#L42-L56" target="_blank" rel="noopener">源码</a>。这个接口是个普通的服务端函数，谁都能直接 POST，它不会因为“前面一定过了确认界面”就放松。</p>
+<p>第四次，在 <code>executeQuery</code> 里面，真正摸到数据库之前：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">const prepared = prepareSqlForExecution(</span><br><span class="line">  sql,</span><br><span class="line">  resolveSqlPermission(connection, requestedPermission),</span><br><span class="line">  MAX_RESULT_ROWS,</span><br><span class="line">)</span><br></pre></td></tr></table></figure>
+<p><a href="https://github.com/annoyc/deepseek-db-chat/blob/d7a9caf477daa1056e32df8763542774c91abcae/src/server/database.ts#L230-L234" target="_blank" rel="noopener">源码</a>。又算一遍权限，又解析一遍 SQL。以后哪天有人新加一个调用 <code>executeQuery</code> 的入口，忘了校验，这一层兜底。</p>
+<p>重复了四次听着啰嗦，但检查本身很便宜，就是一次 AST 解析，而漏掉一次的后果是写生产库。</p>
+<h2 id="权限不是请求里写的"><a href="#权限不是请求里写的" class="headerlink" title="权限不是“请求里写的”"></a>权限不是“请求里写的”</h2>
+<p>第二个要点是权限怎么算。看 <code>sql-policy.ts</code>：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">export function resolveSqlPermission(connection, requested = 'readonly') {</span><br><span class="line">  if (isDemoConnectionId(connection.id) || isDemoDatabaseTarget(connection)) return 'readonly'</span><br><span class="line">  if (requested !== 'write' || connection.env === 'prod' || process.env.SQL_WRITE_ENABLED !== 'true') return 'readonly'</span><br><span class="line">  const allowedTargets = (process.env.SQL_WRITE_ALLOWLIST ?? '').split(',') /* 规整成 host:port/db */</span><br><span class="line">  const target = `${connection.host.toLowerCase()}:${connection.port}/${connection.database}`</span><br><span class="line">  return allowedTargets.includes(target) ? 'write' : 'readonly'</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p><a href="https://github.com/annoyc/deepseek-db-chat/blob/d7a9caf477daa1056e32df8763542774c91abcae/src/server/sql-policy.ts#L6-L21" target="_blank" rel="noopener">源码</a>。函数头上我写了一行注释：浏览器设置或环境标签，自己不能授予写权限。</p>
+<p>浏览器传来的 <code>requested</code> 只是“我想要写”，是一个请求，要同时满足：连接不是演示库、环境标签不是 prod、服务器环境变量打开了写入、这个具体的 host:port/库名在白名单里，才会变成 <code>write</code>。任何一个条件不满足，一律退回只读，没有报错，也没有协商。</p>
+<p>这和论文里“能力由独立的策略引擎签发，Agent 只能申请”是一个形状，我这里的“令牌”退化成了每次现算的一个字符串，策略就是环境变量和白名单。</p>
+<p>实现时踩过一个小坑：白名单比较时，主机名我转小写，数据库名不转。MySQL 的库名在 Linux 上区分大小写，如果统一转小写，<code>DevDB</code> 和 <code>devdb</code> 会被当成同一个，白名单就放宽了。代码里那行注释就是为了防止以后自己手欠把它“统一一下”。</p>
+<p>还有一点：校验失败是<strong>默认拒绝</strong>。<code>sql-guard.ts</code> 里 SQL 解析失败时不会退回去用关键词匹配糊弄一下，直接返回“无法可靠解析，为安全起见已拒绝”。这点和论文里的 fail-closed 一致，代价也一样：偶尔会拒掉一条其实没问题的 SQL。我接受了，用户改下写法就行。</p>
+<h2 id="它挡不住什么"><a href="#它挡不住什么" class="headerlink" title="它挡不住什么"></a>它挡不住什么</h2>
+<p>说清楚边界，免得说大了。</p>
+<p>这套东西管的是“这条语句能不能执行”，不管“这条语句该不该是这个意思”。模型被诱导写了一条合法的 <code>SELECT * FROM users</code>，每一道关都会放行，因为它确实是只读的。这种问题要靠结果脱敏、行数限制之类的别的手段，论文里管这个叫敏感参数的来源追踪，我的项目没做到那一步。</p>
+<p>另外，应用层的校验不能替代数据库自己的权限。README 里我也写了，生产环境还是应该给 Agent 一个数据库层面的只读账号。AST 解析器会有我没想到的绕法，账号权限是最后一道，不依赖我的代码写对没有。</p>
+<h2 id="小结"><a href="#小结" class="headerlink" title="小结"></a>小结</h2>
+<p>确认界面是给人看的，不是授权。授权是服务端的事，而且要在每个真正产生副作用的入口各查一次，用的权限要从服务端能信的东西里现算，不要读请求里带的那个字段。模型只能提议，浏览器也只能提议。</p>
+<p>参考：</p>
+<ul>
+<li><a href="https://arxiv.org/abs/2611.00729" target="_blank" rel="noopener">AgentCap: Capability-Based Runtime Authorization for Secure LLM Agent Execution（arXiv:2611.00729）</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat" target="_blank" rel="noopener">数问工作台 deepseek-db-chat</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/d7a9caf477daa1056e32df8763542774c91abcae/src/server/sql-policy.ts" target="_blank" rel="noopener">src/server/sql-policy.ts</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/d7a9caf477daa1056e32df8763542774c91abcae/src/server/functions/confirm-sql.ts" target="_blank" rel="noopener">src/server/functions/confirm-sql.ts</a></li>
+</ul>]]></content>
+    <categories>
+      <category>Agent</category>
+    </categories>
+    <tags>
+      <tag>Agent</tag>
+      <tag>工具安全</tag>
+      <tag>权限</tag>
+      <tag>数问工作台</tag>
+    </tags>
+  </entry>
+  <entry>
     <title>工具太多、表太多，别全塞给模型：先缩小候选，但要留一条退路</title>
     <url>/2026/11/07/candidate-narrowing-keep-escape-hatch/</url>
     <content><![CDATA[<p>这篇起因是看论文时撞上的，看完发现自己的项目里正好有个土味版本。</p>

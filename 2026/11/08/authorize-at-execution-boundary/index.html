@@ -1,0 +1,1055 @@
+<!DOCTYPE html>
+
+
+
+  
+
+
+<html class="theme-next mist use-motion" lang="zh-Hans">
+<head>
+  <meta charset="UTF-8"/>
+<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+<meta name="theme-color" content="#222">
+
+
+
+
+
+
+
+
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+  
+  <link href="/lib/fancybox/source/jquery.fancybox.css?v=2.1.5" rel="stylesheet" type="text/css" />
+
+
+
+
+
+
+
+<link href="/lib/font-awesome/css/font-awesome.min.css?v=4.6.2" rel="stylesheet" type="text/css" />
+
+<link href="/css/main.css?v=5.1.4" rel="stylesheet" type="text/css" />
+
+
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png?v=5.1.4">
+
+
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png?v=5.1.4">
+
+
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png?v=5.1.4">
+
+
+  <link rel="mask-icon" href="/images/logo.svg?v=5.1.4" color="#222">
+
+
+
+
+
+  <meta name="keywords" content="Agent,工具安全,权限,数问工作台," />
+
+
+
+
+
+
+
+
+
+
+<meta name="description" content="我的数据库 Agent 里，SQL 在生成时校验过一次，用户点确认后，执行前又校验了一次，连“能不能写”这个权限都是服务端重新算的。10 月底有篇论文把这个思路讲成了一条原则：授权决定放在模型外面，并且贴着工具执行的那一刻。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="权限别只在前面拦：用户点了“确认”之后，执行入口还要再查一遍">
+<meta property="og:url" content="http://yc-sky.top/2026/11/08/authorize-at-execution-boundary/index.html">
+<meta property="og:site_name" content="Yc的博客">
+<meta property="og:description" content="我的数据库 Agent 里，SQL 在生成时校验过一次，用户点确认后，执行前又校验了一次，连“能不能写”这个权限都是服务端重新算的。10 月底有篇论文把这个思路讲成了一条原则：授权决定放在模型外面，并且贴着工具执行的那一刻。">
+<meta property="article:published_time" content="2026-11-08T06:00:00.000Z">
+<meta property="article:modified_time" content="2026-11-08T06:00:00.000Z">
+<meta property="article:author" content="ycblue">
+<meta property="article:tag" content="Agent">
+<meta property="article:tag" content="工具安全">
+<meta property="article:tag" content="权限">
+<meta property="article:tag" content="数问工作台">
+<meta name="twitter:card" content="summary">
+
+
+
+<script type="text/javascript" id="hexo.configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    root: '/',
+    scheme: 'Mist',
+    version: '5.1.4',
+    sidebar: {"position":"left","display":"hide","offset":12,"b2t":false,"scrollpercent":false,"onmobile":false},
+    fancybox: true,
+    tabs: true,
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}},
+    duoshuo: {
+      userId: '0',
+      author: '博主'
+    },
+    algolia: {
+      applicationID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    }
+  };
+</script>
+
+
+
+  <link rel="canonical" href="http://yc-sky.top/2026/11/08/authorize-at-execution-boundary/"/>
+
+
+
+
+
+  <title>权限别只在前面拦：用户点了“确认”之后，执行入口还要再查一遍 | Yc的博客</title>
+  
+
+
+
+
+
+
+
+
+<meta name="generator" content="Hexo 4.2.0"></head>
+
+<body itemscope itemtype="http://schema.org/WebPage" lang="zh-Hans">
+
+  
+  
+    
+  
+
+  <div class="container sidebar-position-left page-post-detail">
+    <div class="headband"></div>
+
+    <header id="header" class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-wrapper">
+  <div class="site-meta ">
+    
+
+    <div class="custom-logo-site-title">
+      <a href="/"  class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">Yc的博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+      
+        <p class="site-subtitle"></p>
+      
+  </div>
+
+  <div class="site-nav-toggle">
+    <button>
+      <span class="btn-bar"></span>
+      <span class="btn-bar"></span>
+      <span class="btn-bar"></span>
+    </button>
+  </div>
+</div>
+
+<nav class="site-nav">
+  
+
+  
+    <ul id="menu" class="menu">
+      
+        
+        <li class="menu-item menu-item-home">
+          <a href="/" rel="section">
+            
+              <i class="menu-item-icon fa fa-fw fa-home"></i> <br />
+            
+            首页
+          </a>
+        </li>
+      
+        
+        <li class="menu-item menu-item-agent">
+          <a href="/agent/" rel="section">
+              <i class="menu-item-icon fa fa-fw fa-lightbulb-o"></i> <br />
+            Agent
+          </a>
+        </li>
+        <li class="menu-item menu-item-tags">
+          <a href="/tags/" rel="section">
+            
+              <i class="menu-item-icon fa fa-fw fa-tags"></i> <br />
+            
+            标签
+          </a>
+        </li>
+      
+        
+        <li class="menu-item menu-item-archives">
+          <a href="/archives/" rel="section">
+            
+              <i class="menu-item-icon fa fa-fw fa-archive"></i> <br />
+            
+            归档
+          </a>
+        </li>
+      
+
+      
+        <li class="menu-item menu-item-search">
+          
+            <a href="javascript:;" class="popup-trigger">
+          
+            
+              <i class="menu-item-icon fa fa-search fa-fw"></i> <br />
+            
+            搜索
+          </a>
+        </li>
+      
+    </ul>
+  
+
+  
+    <div class="site-search">
+      
+  <div class="popup search-popup local-search-popup">
+  <div class="local-search-header clearfix">
+    <span class="search-icon">
+      <i class="fa fa-search"></i>
+    </span>
+    <span class="popup-btn-close">
+      <i class="fa fa-times-circle"></i>
+    </span>
+    <div class="local-search-input-wrapper">
+      <input autocomplete="off"
+             placeholder="搜索..." spellcheck="false"
+             type="text" id="local-search-input">
+    </div>
+  </div>
+  <div id="local-search-result"></div>
+</div>
+
+
+
+    </div>
+  
+</nav>
+
+
+
+ </div>
+    </header>
+
+    <main id="main" class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          <div id="content" class="content">
+            
+
+  <div id="posts" class="posts-expand">
+    
+
+  
+
+  
+  
+  
+
+  <article class="post post-type-normal" itemscope itemtype="http://schema.org/Article">
+  
+  
+  
+  <div class="post-block">
+    <link itemprop="mainEntityOfPage" href="http://yc-sky.top/2026/11/08/authorize-at-execution-boundary/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="name" content="ycblue">
+      <meta itemprop="description" content="">
+      <meta itemprop="image" content="https://cdn.jsdelivr.net/gh/yc2hang/cdn-assets/avatar/avatar.jpg">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="Yc的博客">
+    </span>
+
+    
+      <header class="post-header">
+
+        
+        
+          <h1 class="post-title" itemprop="name headline">权限别只在前面拦：用户点了“确认”之后，执行入口还要再查一遍</h1>
+        
+      </header>
+    
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+<p>前几篇写的都是怎么让 Agent 更好用，这篇换个方向，讲一件偏防守的事：权限检查放在哪一层。</p>
+<a id="more"></a>
+<p>我在前端写过很多“按钮置灰”。管理员才能删除，非管理员的按钮就 disabled。后来被后端同事教育过：前端的置灰只是体验，真正的权限必须在接口里再查一遍，因为请求可以不经过你的按钮直接发出来。</p>
+<p>Agent 里是同一个道理，只是“不可信的前端”多了一个：模型。</p>
+<h2 id="论文怎么说"><a href="#论文怎么说" class="headerlink" title="论文怎么说"></a>论文怎么说</h2>
+<p>10 月 31 日挂出的一篇 arXiv 论文，<a href="https://arxiv.org/abs/2611.00729" target="_blank" rel="noopener">AgentCap: Capability-Based Runtime Authorization for Secure LLM Agent Execution</a>（arXiv:2611.00729，NeurIPS 2026 Agents in the Wild 工作坊，非存档）。它的出发点是：提示词过滤和模型对齐都是概率性的，而且发生在攻击者要操纵的那个推理过程里。一条注入进来的指令可以说服一个本来就有合法凭证的 Agent，所以防线不能只在模型脑子里。</p>
+<p>它的做法是在模型和工具之间放一个确定性的授权层。论文把核心约束写成一句话：任何模型产生的工具调用，没有独立可验证的授权，就到不了 MCP server。具体是一个 MCP 包装层加一个授权网关：Agent 提一个调用，同时声明意图，策略引擎按规则检查（工具在不在目录里、敏感参数的来源是否可信、前置步骤做没做、有没有互斥的权限组合），通过了发一个短期的、带调用次数预算的签名令牌，网关在转发给工具之前验证它。</p>
+<p>数字我从原文核对过，都是论文自己的测试：AgentDojo 上，GPT-4o 的攻击成功率从 45.63% 降到 5.09%，GPT-5.4 从 33.23% 降到 0.00%；InjecAgent 上分别从 23.24% 降到 8.63%、从 11.95% 降到 0.00%。验证一次令牌的中位耗时是 79.9 微秒，几乎可以忽略。</p>
+<p>代价它也老实写了：没攻击的正常任务里，可用性掉了 3.1 到 11.7 个点，原因是拒绝得比较保守，缺前置步骤、权限组合冲突的调用直接被拒。所以这不是白送的，规则越严，误伤越多。</p>
+<p>我没有它那么重的令牌体系。但“授权决定放在模型之外、放在执行的那一刻”这条，我在自己的项目里正好有个很朴素的版本。</p>
+<h2 id="数问工作台里的四道关"><a href="#数问工作台里的四道关" class="headerlink" title="数问工作台里的四道关"></a>数问工作台里的四道关</h2>
+<p><a href="https://github.com/annoyc/deepseek-db-chat" target="_blank" rel="noopener">数问工作台</a>是我的自然语言查数据库项目。模型生成 SQL，用户在界面上看过、点“确认”，才真正执行。默认只读，写入要服务器显式开。</p>
+<p>一开始我以为有“用户确认”这一步就够了。后来想明白，用户确认的是“这条 SQL 看起来对”，不是“这条 SQL 有权限执行”。用户看不出一条 SQL 里有没有 <code>LOAD_FILE()</code>，也不会去检查浏览器发给服务器的 <code>sqlPermission</code> 是不是被人改成了 <code>write</code>。</p>
+<p>所以同一件事被查了四次。</p>
+<p>第一次，一轮对话开始时，服务端用连接信息重新算出这次到底允许什么权限：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">const decryptedConnection = resolveDatabaseConnection(data.connection)</span><br><span class="line">const effectiveSqlPermission = resolveSqlPermission(decryptedConnection, data.sqlPermission)</span><br></pre></td></tr></table></figure>
+<p>第二次，模型调用 <code>execute_sql</code> 工具时，工具函数里先过一遍校验，不通过就把原因当成工具结果还给模型，让它自己改：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">const validation = validateSql(sql, sqlPermission)</span><br><span class="line">if (!validation.allowed) {</span><br><span class="line">  const errorMsg = `SQL 被安全策略拦截: ${validation.reason}。当前模式仅允许: ${allowedLabel}。`</span><br><span class="line">  pushError('execute_sql', new Error(errorMsg))</span><br><span class="line">  return errorMsg</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p>这一步是给模型看的，省得一条注定被拒的 SQL 白白让用户确认。</p>
+<p>第三次，用户点确认，请求打到 <code>confirm-sql.ts</code>。注意这里不信任前一次算出来的权限，重新算：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">const decryptedConnection = resolveDatabaseConnection(data.connection)</span><br><span class="line">const permission = resolveSqlPermission(decryptedConnection, data.sqlPermission)</span><br><span class="line">const validation = validateSql(data.sql, permission)</span><br><span class="line">if (!validation.allowed) {</span><br><span class="line">  return { success: false, error: validation.reason || 'SQL 校验失败' }</span><br><span class="line">}</span><br><span class="line">const result = await executeQuery(decryptedConnection, data.sql, permission, getRequest().signal)</span><br></pre></td></tr></table></figure>
+<p><a href="https://github.com/annoyc/deepseek-db-chat/blob/d7a9caf477daa1056e32df8763542774c91abcae/src/server/functions/confirm-sql.ts#L42-L56" target="_blank" rel="noopener">源码</a>。这个接口是个普通的服务端函数，谁都能直接 POST，它不会因为“前面一定过了确认界面”就放松。</p>
+<p>第四次，在 <code>executeQuery</code> 里面，真正摸到数据库之前：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">const prepared = prepareSqlForExecution(</span><br><span class="line">  sql,</span><br><span class="line">  resolveSqlPermission(connection, requestedPermission),</span><br><span class="line">  MAX_RESULT_ROWS,</span><br><span class="line">)</span><br></pre></td></tr></table></figure>
+<p><a href="https://github.com/annoyc/deepseek-db-chat/blob/d7a9caf477daa1056e32df8763542774c91abcae/src/server/database.ts#L230-L234" target="_blank" rel="noopener">源码</a>。又算一遍权限，又解析一遍 SQL。以后哪天有人新加一个调用 <code>executeQuery</code> 的入口，忘了校验，这一层兜底。</p>
+<p>重复了四次听着啰嗦，但检查本身很便宜，就是一次 AST 解析，而漏掉一次的后果是写生产库。</p>
+<h2 id="权限不是请求里写的"><a href="#权限不是请求里写的" class="headerlink" title="权限不是“请求里写的”"></a>权限不是“请求里写的”</h2>
+<p>第二个要点是权限怎么算。看 <code>sql-policy.ts</code>：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">export function resolveSqlPermission(connection, requested = 'readonly') {</span><br><span class="line">  if (isDemoConnectionId(connection.id) || isDemoDatabaseTarget(connection)) return 'readonly'</span><br><span class="line">  if (requested !== 'write' || connection.env === 'prod' || process.env.SQL_WRITE_ENABLED !== 'true') return 'readonly'</span><br><span class="line">  const allowedTargets = (process.env.SQL_WRITE_ALLOWLIST ?? '').split(',') /* 规整成 host:port/db */</span><br><span class="line">  const target = `${connection.host.toLowerCase()}:${connection.port}/${connection.database}`</span><br><span class="line">  return allowedTargets.includes(target) ? 'write' : 'readonly'</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p><a href="https://github.com/annoyc/deepseek-db-chat/blob/d7a9caf477daa1056e32df8763542774c91abcae/src/server/sql-policy.ts#L6-L21" target="_blank" rel="noopener">源码</a>。函数头上我写了一行注释：浏览器设置或环境标签，自己不能授予写权限。</p>
+<p>浏览器传来的 <code>requested</code> 只是“我想要写”，是一个请求，要同时满足：连接不是演示库、环境标签不是 prod、服务器环境变量打开了写入、这个具体的 host:port/库名在白名单里，才会变成 <code>write</code>。任何一个条件不满足，一律退回只读，没有报错，也没有协商。</p>
+<p>这和论文里“能力由独立的策略引擎签发，Agent 只能申请”是一个形状，我这里的“令牌”退化成了每次现算的一个字符串，策略就是环境变量和白名单。</p>
+<p>实现时踩过一个小坑：白名单比较时，主机名我转小写，数据库名不转。MySQL 的库名在 Linux 上区分大小写，如果统一转小写，<code>DevDB</code> 和 <code>devdb</code> 会被当成同一个，白名单就放宽了。代码里那行注释就是为了防止以后自己手欠把它“统一一下”。</p>
+<p>还有一点：校验失败是<strong>默认拒绝</strong>。<code>sql-guard.ts</code> 里 SQL 解析失败时不会退回去用关键词匹配糊弄一下，直接返回“无法可靠解析，为安全起见已拒绝”。这点和论文里的 fail-closed 一致，代价也一样：偶尔会拒掉一条其实没问题的 SQL。我接受了，用户改下写法就行。</p>
+<h2 id="它挡不住什么"><a href="#它挡不住什么" class="headerlink" title="它挡不住什么"></a>它挡不住什么</h2>
+<p>说清楚边界，免得说大了。</p>
+<p>这套东西管的是“这条语句能不能执行”，不管“这条语句该不该是这个意思”。模型被诱导写了一条合法的 <code>SELECT * FROM users</code>，每一道关都会放行，因为它确实是只读的。这种问题要靠结果脱敏、行数限制之类的别的手段，论文里管这个叫敏感参数的来源追踪，我的项目没做到那一步。</p>
+<p>另外，应用层的校验不能替代数据库自己的权限。README 里我也写了，生产环境还是应该给 Agent 一个数据库层面的只读账号。AST 解析器会有我没想到的绕法，账号权限是最后一道，不依赖我的代码写对没有。</p>
+<h2 id="小结"><a href="#小结" class="headerlink" title="小结"></a>小结</h2>
+<p>确认界面是给人看的，不是授权。授权是服务端的事，而且要在每个真正产生副作用的入口各查一次，用的权限要从服务端能信的东西里现算，不要读请求里带的那个字段。模型只能提议，浏览器也只能提议。</p>
+<p>参考：</p>
+<ul>
+<li><a href="https://arxiv.org/abs/2611.00729" target="_blank" rel="noopener">AgentCap: Capability-Based Runtime Authorization for Secure LLM Agent Execution（arXiv:2611.00729）</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat" target="_blank" rel="noopener">数问工作台 deepseek-db-chat</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/d7a9caf477daa1056e32df8763542774c91abcae/src/server/sql-policy.ts" target="_blank" rel="noopener">src/server/sql-policy.ts</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/d7a9caf477daa1056e32df8763542774c91abcae/src/server/functions/confirm-sql.ts" target="_blank" rel="noopener">src/server/functions/confirm-sql.ts</a></li>
+</ul>
+    </div>
+
+    <footer class="post-footer">
+        <div class="post-tags">
+          <a href="/agent/" rel="tag"># Agent</a>
+          <a href="/agent/" rel="tag"># 工具安全</a>
+          <a href="/agent/" rel="tag"># 权限</a>
+          <a href="/agent/" rel="tag"># 数问工作台</a>
+        </div>
+        <div class="post-nav">
+          <div class="post-nav-next post-nav-item">
+              <a href="/2026/11/07/candidate-narrowing-keep-escape-hatch/" rel="next" title="工具太多、表太多，别全塞给模型：先缩小候选，但要留一条退路">
+                <i class="fa fa-chevron-left"></i> 工具太多、表太多，别全塞给模型：先缩小候选，但要留一条退路
+              </a>
+          </div>
+          <span class="post-nav-divider"></span>
+          <div class="post-nav-prev post-nav-item">
+              
+          </div>
+        </div>
+    </footer>
+  </div>
+  
+  
+  
+  </article>
+
+
+
+    <div class="post-spread">
+      
+    </div>
+  </div>
+
+
+          </div>
+          
+
+
+          
+
+  
+
+
+
+        </div>
+        
+          
+  
+  <div class="sidebar-toggle">
+    <div class="sidebar-toggle-line-wrap">
+      <span class="sidebar-toggle-line sidebar-toggle-line-first"></span>
+      <span class="sidebar-toggle-line sidebar-toggle-line-middle"></span>
+      <span class="sidebar-toggle-line sidebar-toggle-line-last"></span>
+    </div>
+  </div>
+
+  <aside id="sidebar" class="sidebar">
+    
+    <div class="sidebar-inner">
+
+      
+
+      
+        <ul class="sidebar-nav motion-element">
+          <li class="sidebar-nav-toc sidebar-nav-active" data-target="post-toc-wrap">
+            文章目录
+          </li>
+          <li class="sidebar-nav-overview" data-target="site-overview-wrap">
+            站点概览
+          </li>
+        </ul>
+      
+
+      <section class="site-overview-wrap sidebar-panel">
+        <div class="site-overview">
+          <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+            
+              <img class="site-author-image" itemprop="image"
+                src="https://cdn.jsdelivr.net/gh/yc2hang/cdn-assets/avatar/avatar.jpg"
+                alt="ycblue" />
+            
+              <p class="site-author-name" itemprop="name">ycblue</p>
+              <p class="site-description motion-element" itemprop="description">stay hungry, stay foolish</p>
+          </div>
+
+          <nav class="site-state motion-element">
+
+            
+              <div class="site-state-item site-state-posts">
+              
+                <a href="/archives/%7C%7Carchive">
+              
+                  <span class="site-state-item-count">30</span>
+                  <span class="site-state-item-name">日志</span>
+                </a>
+              </div>
+            
+
+            
+              
+              
+              <div class="site-state-item site-state-categories">
+                <a href="/categories/index.html">
+                  <span class="site-state-item-count">3</span>
+                  <span class="site-state-item-name">分类</span>
+                </a>
+              </div>
+            
+
+            
+              
+              
+              <div class="site-state-item site-state-tags">
+                <a href="/tags/index.html">
+                  <span class="site-state-item-count">14</span>
+                  <span class="site-state-item-name">标签</span>
+                </a>
+              </div>
+            
+
+          </nav>
+
+          
+
+          
+            <div class="links-of-author motion-element">
+                
+                  <span class="links-of-author-item">
+                    <a href="https://github.com/yc2hang" target="_blank" title="GitHub">
+                      
+                        <i class="fa fa-fw fa-github"></i>GitHub</a>
+                  </span>
+                
+                  <span class="links-of-author-item">
+                    <a href="mailto:yc2hangycz@gmail.com" target="_blank" title="E-Mail">
+                      
+                        <i class="fa fa-fw fa-envelope"></i>E-Mail</a>
+                  </span>
+                
+            </div>
+          
+
+          
+          
+
+          
+          
+
+          
+
+        </div>
+      </section>
+
+      
+      <!--noindex-->
+        <section class="post-toc-wrap motion-element sidebar-panel sidebar-panel-active">
+          <div class="post-toc">
+
+            
+              
+            
+
+            
+              <div class="post-toc-content"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#论文怎么说"><span class="nav-number">1.</span> <span class="nav-text">论文怎么说</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#数问工作台里的四道关"><span class="nav-number">2.</span> <span class="nav-text">数问工作台里的四道关</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#权限不是请求里写的"><span class="nav-number">3.</span> <span class="nav-text">权限不是“请求里写的”</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#它挡不住什么"><span class="nav-number">4.</span> <span class="nav-text">它挡不住什么</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#小结"><span class="nav-number">5.</span> <span class="nav-text">小结</span></a></li></ol></div>
+            
+
+          </div>
+        </section>
+      <!--/noindex-->
+      
+
+      
+
+    </div>
+  </aside>
+
+
+        
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="footer-inner">
+        <div class="copyright">&copy; <span itemprop="copyrightYear">2025</span>
+  <span class="with-love">
+    <i class="fa fa-heart"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">ycblue</span>
+
+  
+</div>
+
+
+  <div class="powered-by">由 <a class="theme-link" target="_blank" href="https://hexo.io">Hexo</a> 强力驱动</div>
+
+
+
+  <span class="post-meta-divider">|</span>
+
+
+
+  <div class="theme-info">主题 &mdash; <a class="theme-link" target="_blank" href="https://github.com/iissnan/hexo-theme-next">NexT.Mist</a> v5.1.4</div>
+
+
+
+
+        
+
+
+
+
+
+
+
+        
+      </div>
+    </footer>
+
+    
+      <div class="back-to-top">
+        <i class="fa fa-arrow-up"></i>
+        
+      </div>
+    
+
+    
+
+  </div>
+
+  
+
+<script type="text/javascript">
+  if (Object.prototype.toString.call(window.Promise) !== '[object Function]') {
+    window.Promise = null;
+  }
+</script>
+
+
+
+
+
+
+
+
+
+  
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+  
+  
+    <script type="text/javascript" src="/lib/jquery/index.js?v=2.1.3"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/fastclick/lib/fastclick.min.js?v=1.0.6"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/jquery_lazyload/jquery.lazyload.js?v=1.9.7"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/velocity/velocity.min.js?v=1.2.1"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/velocity/velocity.ui.min.js?v=1.2.1"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/fancybox/source/jquery.fancybox.pack.js?v=2.1.5"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/canvas-nest/canvas-nest.min.js"></script>
+  
+
+
+  
+
+
+  <script type="text/javascript" src="/js/src/utils.js?v=5.1.4"></script>
+
+  <script type="text/javascript" src="/js/src/motion.js?v=5.1.4"></script>
+
+
+
+  
+  
+
+  
+  <script type="text/javascript" src="/js/src/scrollspy.js?v=5.1.4"></script>
+<script type="text/javascript" src="/js/src/post-details.js?v=5.1.4"></script>
+
+
+
+  
+
+
+  <script type="text/javascript" src="/js/src/bootstrap.js?v=5.1.4"></script>
+
+
+
+  
+
+
+  
+
+
+
+
+	
+
+
+
+
+
+  
+
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  <script type="text/javascript">
+    // Popup Window;
+    var isfetched = false;
+    var isXml = true;
+    // Search DB path;
+    var search_path = "search.xml";
+    if (search_path.length === 0) {
+      search_path = "search.xml";
+    } else if (/json$/i.test(search_path)) {
+      isXml = false;
+    }
+    var path = "/" + search_path;
+    // monitor main search box;
+
+    var onPopupClose = function (e) {
+      $('.popup').hide();
+      $('#local-search-input').val('');
+      $('.search-result-list').remove();
+      $('#no-result').remove();
+      $(".local-search-pop-overlay").remove();
+      $('body').css('overflow', '');
+    }
+
+    function proceedsearch() {
+      $("body")
+        .append('<div class="search-popup-overlay local-search-pop-overlay"></div>')
+        .css('overflow', 'hidden');
+      $('.search-popup-overlay').click(onPopupClose);
+      $('.popup').toggle();
+      var $localSearchInput = $('#local-search-input');
+      $localSearchInput.attr("autocapitalize", "none");
+      $localSearchInput.attr("autocorrect", "off");
+      $localSearchInput.focus();
+    }
+
+    // search function;
+    var searchFunc = function(path, search_id, content_id) {
+      'use strict';
+
+      // start loading animation
+      $("body")
+        .append('<div class="search-popup-overlay local-search-pop-overlay">' +
+          '<div id="search-loading-icon">' +
+          '<i class="fa fa-spinner fa-pulse fa-5x fa-fw"></i>' +
+          '</div>' +
+          '</div>')
+        .css('overflow', 'hidden');
+      $("#search-loading-icon").css('margin', '20% auto 0 auto').css('text-align', 'center');
+
+      $.ajax({
+        url: path,
+        dataType: isXml ? "xml" : "json",
+        async: true,
+        success: function(res) {
+          // get the contents from search data
+          isfetched = true;
+          $('.popup').detach().appendTo('.header-inner');
+          var datas = isXml ? $("entry", res).map(function() {
+            return {
+              title: $("title", this).text(),
+              content: $("content",this).text(),
+              url: $("url" , this).text()
+            };
+          }).get() : res;
+          var input = document.getElementById(search_id);
+          var resultContent = document.getElementById(content_id);
+          var inputEventFunction = function() {
+            var searchText = input.value.trim().toLowerCase();
+            var keywords = searchText.split(/[\s\-]+/);
+            if (keywords.length > 1) {
+              keywords.push(searchText);
+            }
+            var resultItems = [];
+            if (searchText.length > 0) {
+              // perform local searching
+              datas.forEach(function(data) {
+                var isMatch = false;
+                var hitCount = 0;
+                var searchTextCount = 0;
+                var title = data.title.trim();
+                var titleInLowerCase = title.toLowerCase();
+                var content = data.content.trim().replace(/<[^>]+>/g,"");
+                var contentInLowerCase = content.toLowerCase();
+                var articleUrl = decodeURIComponent(data.url);
+                var indexOfTitle = [];
+                var indexOfContent = [];
+                // only match articles with not empty titles
+                if(title != '') {
+                  keywords.forEach(function(keyword) {
+                    function getIndexByWord(word, text, caseSensitive) {
+                      var wordLen = word.length;
+                      if (wordLen === 0) {
+                        return [];
+                      }
+                      var startPosition = 0, position = [], index = [];
+                      if (!caseSensitive) {
+                        text = text.toLowerCase();
+                        word = word.toLowerCase();
+                      }
+                      while ((position = text.indexOf(word, startPosition)) > -1) {
+                        index.push({position: position, word: word});
+                        startPosition = position + wordLen;
+                      }
+                      return index;
+                    }
+
+                    indexOfTitle = indexOfTitle.concat(getIndexByWord(keyword, titleInLowerCase, false));
+                    indexOfContent = indexOfContent.concat(getIndexByWord(keyword, contentInLowerCase, false));
+                  });
+                  if (indexOfTitle.length > 0 || indexOfContent.length > 0) {
+                    isMatch = true;
+                    hitCount = indexOfTitle.length + indexOfContent.length;
+                  }
+                }
+
+                // show search results
+
+                if (isMatch) {
+                  // sort index by position of keyword
+
+                  [indexOfTitle, indexOfContent].forEach(function (index) {
+                    index.sort(function (itemLeft, itemRight) {
+                      if (itemRight.position !== itemLeft.position) {
+                        return itemRight.position - itemLeft.position;
+                      } else {
+                        return itemLeft.word.length - itemRight.word.length;
+                      }
+                    });
+                  });
+
+                  // merge hits into slices
+
+                  function mergeIntoSlice(text, start, end, index) {
+                    var item = index[index.length - 1];
+                    var position = item.position;
+                    var word = item.word;
+                    var hits = [];
+                    var searchTextCountInSlice = 0;
+                    while (position + word.length <= end && index.length != 0) {
+                      if (word === searchText) {
+                        searchTextCountInSlice++;
+                      }
+                      hits.push({position: position, length: word.length});
+                      var wordEnd = position + word.length;
+
+                      // move to next position of hit
+
+                      index.pop();
+                      while (index.length != 0) {
+                        item = index[index.length - 1];
+                        position = item.position;
+                        word = item.word;
+                        if (wordEnd > position) {
+                          index.pop();
+                        } else {
+                          break;
+                        }
+                      }
+                    }
+                    searchTextCount += searchTextCountInSlice;
+                    return {
+                      hits: hits,
+                      start: start,
+                      end: end,
+                      searchTextCount: searchTextCountInSlice
+                    };
+                  }
+
+                  var slicesOfTitle = [];
+                  if (indexOfTitle.length != 0) {
+                    slicesOfTitle.push(mergeIntoSlice(title, 0, title.length, indexOfTitle));
+                  }
+
+                  var slicesOfContent = [];
+                  while (indexOfContent.length != 0) {
+                    var item = indexOfContent[indexOfContent.length - 1];
+                    var position = item.position;
+                    var word = item.word;
+                    // cut out 100 characters
+                    var start = position - 20;
+                    var end = position + 80;
+                    if(start < 0){
+                      start = 0;
+                    }
+                    if (end < position + word.length) {
+                      end = position + word.length;
+                    }
+                    if(end > content.length){
+                      end = content.length;
+                    }
+                    slicesOfContent.push(mergeIntoSlice(content, start, end, indexOfContent));
+                  }
+
+                  // sort slices in content by search text's count and hits' count
+
+                  slicesOfContent.sort(function (sliceLeft, sliceRight) {
+                    if (sliceLeft.searchTextCount !== sliceRight.searchTextCount) {
+                      return sliceRight.searchTextCount - sliceLeft.searchTextCount;
+                    } else if (sliceLeft.hits.length !== sliceRight.hits.length) {
+                      return sliceRight.hits.length - sliceLeft.hits.length;
+                    } else {
+                      return sliceLeft.start - sliceRight.start;
+                    }
+                  });
+
+                  // select top N slices in content
+
+                  var upperBound = parseInt('1');
+                  if (upperBound >= 0) {
+                    slicesOfContent = slicesOfContent.slice(0, upperBound);
+                  }
+
+                  // highlight title and content
+
+                  function highlightKeyword(text, slice) {
+                    var result = '';
+                    var prevEnd = slice.start;
+                    slice.hits.forEach(function (hit) {
+                      result += text.substring(prevEnd, hit.position);
+                      var end = hit.position + hit.length;
+                      result += '<b class="search-keyword">' + text.substring(hit.position, end) + '</b>';
+                      prevEnd = end;
+                    });
+                    result += text.substring(prevEnd, slice.end);
+                    return result;
+                  }
+
+                  var resultItem = '';
+
+                  if (slicesOfTitle.length != 0) {
+                    resultItem += "<li><a href='" + articleUrl + "' class='search-result-title'>" + highlightKeyword(title, slicesOfTitle[0]) + "</a>";
+                  } else {
+                    resultItem += "<li><a href='" + articleUrl + "' class='search-result-title'>" + title + "</a>";
+                  }
+
+                  slicesOfContent.forEach(function (slice) {
+                    resultItem += "<a href='" + articleUrl + "'>" +
+                      "<p class=\"search-result\">" + highlightKeyword(content, slice) +
+                      "...</p>" + "</a>";
+                  });
+
+                  resultItem += "</li>";
+                  resultItems.push({
+                    item: resultItem,
+                    searchTextCount: searchTextCount,
+                    hitCount: hitCount,
+                    id: resultItems.length
+                  });
+                }
+              })
+            };
+            if (keywords.length === 1 && keywords[0] === "") {
+              resultContent.innerHTML = '<div id="no-result"><i class="fa fa-search fa-5x" /></div>'
+            } else if (resultItems.length === 0) {
+              resultContent.innerHTML = '<div id="no-result"><i class="fa fa-frown-o fa-5x" /></div>'
+            } else {
+              resultItems.sort(function (resultLeft, resultRight) {
+                if (resultLeft.searchTextCount !== resultRight.searchTextCount) {
+                  return resultRight.searchTextCount - resultLeft.searchTextCount;
+                } else if (resultLeft.hitCount !== resultRight.hitCount) {
+                  return resultRight.hitCount - resultLeft.hitCount;
+                } else {
+                  return resultRight.id - resultLeft.id;
+                }
+              });
+              var searchResultList = '<ul class=\"search-result-list\">';
+              resultItems.forEach(function (result) {
+                searchResultList += result.item;
+              })
+              searchResultList += "</ul>";
+              resultContent.innerHTML = searchResultList;
+            }
+          }
+
+          if ('auto' === 'auto') {
+            input.addEventListener('input', inputEventFunction);
+          } else {
+            $('.search-icon').click(inputEventFunction);
+            input.addEventListener('keypress', function (event) {
+              if (event.keyCode === 13) {
+                inputEventFunction();
+              }
+            });
+          }
+
+          // remove loading animation
+          $(".local-search-pop-overlay").remove();
+          $('body').css('overflow', '');
+
+          proceedsearch();
+        }
+      });
+    }
+
+    // handle and trigger popup window;
+    $('.popup-trigger').click(function(e) {
+      e.stopPropagation();
+      if (isfetched === false) {
+        searchFunc(path, 'local-search-input', 'local-search-result');
+      } else {
+        proceedsearch();
+      };
+    });
+
+    $('.popup-btn-close').click(onPopupClose);
+    $('.popup').click(function(e){
+      e.stopPropagation();
+    });
+    $(document).on('keyup', function (event) {
+      var shouldDismissSearchPopup = event.which === 27 &&
+        $('.search-popup').is(':visible');
+      if (shouldDismissSearchPopup) {
+        onPopupClose();
+      }
+    });
+  </script>
+
+
+
+
+
+  
+
+  
+
+  
+
+  
+  
+
+  
+
+  
+
+  
+
+</body>
+</html>

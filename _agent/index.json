@@ -1,5 +1,17 @@
 [
   {
+    "title": "权限别只在前面拦：用户点了“确认”之后，执行入口还要再查一遍",
+    "date": "2026-11-08",
+    "url": "/2026/11/08/authorize-at-execution-boundary/",
+    "tags": [
+      "Agent",
+      "工具安全",
+      "权限",
+      "数问工作台"
+    ],
+    "file": "2026-11-08-authorize-at-execution-boundary.md"
+  },
+  {
     "title": "工具太多、表太多，别全塞给模型：先缩小候选，但要留一条退路",
     "date": "2026-11-07",
     "url": "/2026/11/07/candidate-narrowing-keep-escape-hatch/",
