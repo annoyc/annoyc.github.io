@@ -1,0 +1,1053 @@
+<!DOCTYPE html>
+
+
+
+  
+
+
+<html class="theme-next mist use-motion" lang="zh-Hans">
+<head>
+  <meta charset="UTF-8"/>
+<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+<meta name="theme-color" content="#222">
+
+
+
+
+
+
+
+
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+  
+  <link href="/lib/fancybox/source/jquery.fancybox.css?v=2.1.5" rel="stylesheet" type="text/css" />
+
+
+
+
+
+
+
+<link href="/lib/font-awesome/css/font-awesome.min.css?v=4.6.2" rel="stylesheet" type="text/css" />
+
+<link href="/css/main.css?v=5.1.4" rel="stylesheet" type="text/css" />
+
+
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png?v=5.1.4">
+
+
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png?v=5.1.4">
+
+
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png?v=5.1.4">
+
+
+  <link rel="mask-icon" href="/images/logo.svg?v=5.1.4" color="#222">
+
+
+
+
+
+  <meta name="keywords" content="Agent,Prompt Caching,成本,数问工作台," />
+
+
+
+
+
+
+
+
+
+
+<meta name="description" content="Agent 每走一步都要把整段上下文重新发给模型，大部分内容其实和上一步一模一样。前缀缓存吃的就是这部分，但前提是前面的字节不能变。我回头看了自己项目里 system prompt 的拼法，才发现哪些地方做对了，哪些地方只是碰巧没出事。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="前缀缓存：system prompt 里会变的东西，一律往后放">
+<meta property="og:url" content="http://yc-sky.top/2026/11/09/prefix-cache-dynamic-last/index.html">
+<meta property="og:site_name" content="Yc的博客">
+<meta property="og:description" content="Agent 每走一步都要把整段上下文重新发给模型，大部分内容其实和上一步一模一样。前缀缓存吃的就是这部分，但前提是前面的字节不能变。我回头看了自己项目里 system prompt 的拼法，才发现哪些地方做对了，哪些地方只是碰巧没出事。">
+<meta property="article:published_time" content="2026-11-09T06:00:00.000Z">
+<meta property="article:modified_time" content="2026-11-09T06:00:00.000Z">
+<meta property="article:author" content="ycblue">
+<meta property="article:tag" content="Agent">
+<meta property="article:tag" content="Prompt Caching">
+<meta property="article:tag" content="成本">
+<meta property="article:tag" content="数问工作台">
+<meta name="twitter:card" content="summary">
+
+
+
+<script type="text/javascript" id="hexo.configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    root: '/',
+    scheme: 'Mist',
+    version: '5.1.4',
+    sidebar: {"position":"left","display":"hide","offset":12,"b2t":false,"scrollpercent":false,"onmobile":false},
+    fancybox: true,
+    tabs: true,
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}},
+    duoshuo: {
+      userId: '0',
+      author: '博主'
+    },
+    algolia: {
+      applicationID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    }
+  };
+</script>
+
+
+
+  <link rel="canonical" href="http://yc-sky.top/2026/11/09/prefix-cache-dynamic-last/"/>
+
+
+
+
+
+  <title>前缀缓存：system prompt 里会变的东西，一律往后放 | Yc的博客</title>
+  
+
+
+
+
+
+
+
+
+<meta name="generator" content="Hexo 4.2.0"></head>
+
+<body itemscope itemtype="http://schema.org/WebPage" lang="zh-Hans">
+
+  
+  
+    
+  
+
+  <div class="container sidebar-position-left page-post-detail">
+    <div class="headband"></div>
+
+    <header id="header" class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-wrapper">
+  <div class="site-meta ">
+    
+
+    <div class="custom-logo-site-title">
+      <a href="/"  class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">Yc的博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+      
+        <p class="site-subtitle"></p>
+      
+  </div>
+
+  <div class="site-nav-toggle">
+    <button>
+      <span class="btn-bar"></span>
+      <span class="btn-bar"></span>
+      <span class="btn-bar"></span>
+    </button>
+  </div>
+</div>
+
+<nav class="site-nav">
+  
+
+  
+    <ul id="menu" class="menu">
+      
+        
+        <li class="menu-item menu-item-home">
+          <a href="/" rel="section">
+            
+              <i class="menu-item-icon fa fa-fw fa-home"></i> <br />
+            
+            首页
+          </a>
+        </li>
+      
+        
+        <li class="menu-item menu-item-agent">
+          <a href="/agent/" rel="section">
+              <i class="menu-item-icon fa fa-fw fa-lightbulb-o"></i> <br />
+            Agent
+          </a>
+        </li>
+        <li class="menu-item menu-item-tags">
+          <a href="/tags/" rel="section">
+            
+              <i class="menu-item-icon fa fa-fw fa-tags"></i> <br />
+            
+            标签
+          </a>
+        </li>
+      
+        
+        <li class="menu-item menu-item-archives">
+          <a href="/archives/" rel="section">
+            
+              <i class="menu-item-icon fa fa-fw fa-archive"></i> <br />
+            
+            归档
+          </a>
+        </li>
+      
+
+      
+        <li class="menu-item menu-item-search">
+          
+            <a href="javascript:;" class="popup-trigger">
+          
+            
+              <i class="menu-item-icon fa fa-search fa-fw"></i> <br />
+            
+            搜索
+          </a>
+        </li>
+      
+    </ul>
+  
+
+  
+    <div class="site-search">
+      
+  <div class="popup search-popup local-search-popup">
+  <div class="local-search-header clearfix">
+    <span class="search-icon">
+      <i class="fa fa-search"></i>
+    </span>
+    <span class="popup-btn-close">
+      <i class="fa fa-times-circle"></i>
+    </span>
+    <div class="local-search-input-wrapper">
+      <input autocomplete="off"
+             placeholder="搜索..." spellcheck="false"
+             type="text" id="local-search-input">
+    </div>
+  </div>
+  <div id="local-search-result"></div>
+</div>
+
+
+
+    </div>
+  
+</nav>
+
+
+
+ </div>
+    </header>
+
+    <main id="main" class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          <div id="content" class="content">
+            
+
+  <div id="posts" class="posts-expand">
+    
+
+  
+
+  
+  
+  
+
+  <article class="post post-type-normal" itemscope itemtype="http://schema.org/Article">
+  
+  
+  
+  <div class="post-block">
+    <link itemprop="mainEntityOfPage" href="http://yc-sky.top/2026/11/09/prefix-cache-dynamic-last/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="name" content="ycblue">
+      <meta itemprop="description" content="">
+      <meta itemprop="image" content="https://cdn.jsdelivr.net/gh/yc2hang/cdn-assets/avatar/avatar.jpg">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="Yc的博客">
+    </span>
+
+    
+      <header class="post-header">
+
+        
+        
+          <h1 class="post-title" itemprop="name headline">前缀缓存：system prompt 里会变的东西，一律往后放</h1>
+        
+      </header>
+    
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+<p>前面写 Agent 循环的时候我提过一句：每一轮都要把整个 messages 重新发给模型。当时只关心“要不要压缩”，没细想另一面：既然每一步发的东西大部分都一样，服务端能不能别重复算？</p>
+<a id="more"></a>
+<p>能，这就是前缀缓存（prompt caching）。我是用 DeepSeek 的 API 才第一次认真看它的，后来发现各家都有，规则也差不多。</p>
+<h2 id="先把规则说清楚"><a href="#先把规则说清楚" class="headerlink" title="先把规则说清楚"></a>先把规则说清楚</h2>
+<p>缓存按前缀匹配。两次请求，从第一个 token 开始，一模一样的那一段可以复用，从第一个不一样的地方开始，后面全部重算，哪怕后面又碰巧一样。</p>
+<p>DeepSeek 的<a href="https://api-docs.deepseek.com/guides/kv_cache" target="_blank" rel="noopener">文档</a>里写得很直白：默认开启，不用改代码；请求必须完整命中某个已保存的“前缀单元”才算命中；而且是 best-effort，不保证命中率。命中情况在响应的 <code>usage</code> 里：<code>prompt_cache_hit_tokens</code> 和 <code>prompt_cache_miss_tokens</code>。</p>
+<p>前端同学可以类比成 HTTP 缓存里那个“URL 变一个字符就是新资源”，只不过这里是“前缀变一个字符，后面整段都失效”。</p>
+<p>所以规则只有一条：越稳定的内容越靠前，越容易变的越靠后。听着像废话，但落到代码里，很容易被一行不起眼的模板字符串破坏。</p>
+<h2 id="数据说话"><a href="#数据说话" class="headerlink" title="数据说话"></a>数据说话</h2>
+<p>1 月有篇论文专门测了这件事：<a href="https://arxiv.org/abs/2601.06007" target="_blank" rel="noopener">Don't Break the Cache: An Evaluation of Prompt Caching for Long-Horizon Agentic Tasks</a>（arXiv:2601.06007）。他们在 OpenAI、Anthropic、Google 三家上，用带真实搜索工具调用的多轮任务跑了 500 多个会话，system prompt 约 1 万 token。我打开摘要核对过的结论：</p>
+<ul>
+<li>开了缓存之后 API 费用降低 41% 到 80%，首 token 延迟改善 13% 到 31%。</li>
+<li>缓存放在哪很重要。笼统地把整段上下文都标成可缓存，有时反而会让延迟变差；有控制地放缓存块，收益才稳定。</li>
+<li>给出的建议里有两条我觉得最实用：动态内容放在 system prompt 的末尾，让稳定的前缀能被缓存；动态的工具结果不要放进被缓存的那一块。</li>
+</ul>
+<p>这是它在自己实验设置下的结果，不同模型、不同提示长度会有出入，我没法保证我的项目也是这个数。但方向和我自己的体会一致。</p>
+<h2 id="我的-system-prompt-是怎么拼的"><a href="#我的-system-prompt-是怎么拼的" class="headerlink" title="我的 system prompt 是怎么拼的"></a>我的 system prompt 是怎么拼的</h2>
+<p>数问工作台里，一次对话的 system prompt 在 <a href="https://github.com/annoyc/deepseek-db-chat/blob/d7a9caf477daa1056e32df8763542774c91abcae/src/server/agent.ts#L297-L324" target="_blank" rel="noopener"><code>src/server/agent.ts</code></a> 的 <code>createDbAgent</code> 里拼出来。我删掉细节，只留骨架：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br></pre></td><td class="code"><pre><span class="line">const promptSections: string[] = [SYSTEM_PROMPT_CORE, SYSTEM_PROMPT_SCHEMA]</span><br><span class="line"></span><br><span class="line">if (intentType !== 'analysis' &amp;&amp; intentType !== 'explore_schema') {</span><br><span class="line">  promptSections.push(SYSTEM_PROMPT_WORKFLOW)</span><br><span class="line">}</span><br><span class="line">if (intentType !== 'explore_schema' &amp;&amp; intentType !== 'analysis') {</span><br><span class="line">  promptSections.push(SYSTEM_PROMPT_FEW_SHOT)</span><br><span class="line">}</span><br><span class="line">if (intentType === 'analysis' || intentType === 'complex_query'</span><br><span class="line">    || intentType === 'simple_query' || hasHistory) {</span><br><span class="line">  promptSections.push(SYSTEM_PROMPT_ANALYSIS)</span><br><span class="line">}</span><br><span class="line">promptSections.push(SYSTEM_PROMPT_ADDITIONAL)</span><br><span class="line">let systemPrompt = promptSections.join('\n')</span><br><span class="line"></span><br><span class="line">// 往下全是动态的</span><br><span class="line">systemPrompt += `\n\n当前时间: ${currentTime}`</span><br><span class="line">systemPrompt += `\n当前连接的数据库: ${connection.database} (${connection.host}:${connection.port})`</span><br><span class="line">// 意图路由提示、SQL 剩余次数、已执行 SQL 的记录……</span><br></pre></td></tr></table></figure>
+<p>顺序是：固定的大段文字在前，当前时间、连接信息、路由提示、剩余执行次数、执行记录依次排在后面。这个顺序就是为了缓存排的，README 里“确定性消息构建”说的也是这个：线以上不变，线以下才放会变的东西。但今天重读，我发现它没有我想的那么彻底。</p>
+<p>这个顺序带来的实际收益在循环里。<code>maxSteps</code> 是 10，一次提问里模型最多走 10 步，每一步 system prompt 完全一样，messages 只往后追加。所以第 2 步起，前一步的整段输入都是前缀，只有新增的工具结果是 miss。这是最大的一块，我的 <code>mergeUsage</code> 里专门把两个字段累加起来，就是为了能看一次对话总共命中了多少。</p>
+<h2 id="但有两个地方没那么彻底"><a href="#但有两个地方没那么彻底" class="headerlink" title="但有两个地方没那么彻底"></a>但有两个地方没那么彻底</h2>
+<p>第一个，当前时间精确到分钟：<code>当前时间: 2026-11-09 14:03 星期一</code>。它在静态段后面，所以只会让它后面的那部分失效，静态大段不受影响。如果我当初顺手把它放到 prompt 开头（“你现在是 xx，现在时间是 xx”这种写法特别常见），整个 prompt 每分钟都换一个前缀。这种坑很隐蔽，功能完全正常，只是账单悄悄变高。</p>
+<p>第二个，静态段本身不是“一整块”。<code>WORKFLOW</code>、<code>FEW_SHOT</code>、<code>ANALYSIS</code> 是按意图决定放不放的。意图是一个单独的 LLM 分类请求给出的，不同的问题可能分到不同的意图。意图一变，从被增减的那一段开始往后全部不同，而 <code>SYSTEM_PROMPT_ADDITIONAL</code> 是排在这些可选段后面的。所以跨轮次看，真正稳定共享的只有开头的 <code>CORE</code> 和 <code>SCHEMA</code> 两段，同一个意图的连续提问才能共享得更多。</p>
+<p>这两点我都没有实测命中率，下面说的只是读代码得出的判断：同一次提问内部的缓存是稳的，跨提问的缓存取决于意图稳不稳定，大概率没有我 README 里写的那么理想。如果要改，方向是把 <code>ADDITIONAL</code> 这种每次都有的段挪到可选段前面，让共享前缀更长。不过挪动会改变模型看到的指令顺序，对行为有没有影响得重新跑一遍评测，我暂时没动。</p>
+<h2 id="几个容易踩的点"><a href="#几个容易踩的点" class="headerlink" title="几个容易踩的点"></a>几个容易踩的点</h2>
+<p>写这篇的时候我把容易破坏前缀的东西列了一遍，大部分我自己的项目里都有出现的可能：</p>
+<ul>
+<li>时间戳、请求 ID、随机数放在开头。放末尾，或者干脆不放，让模型用工具查。</li>
+<li>对 JSON 做序列化时 key 顺序不稳定。同一份数据 <code>JSON.stringify</code> 两次，只要对象构造顺序不同，字符串就不一样。要么固定顺序，要么排序后再序列化。</li>
+<li>动态改工具列表。工具定义通常排在 system prompt 附近，增删一个工具，后面整段都 miss。论文里也提醒过动态的函数调用会破坏缓存。</li>
+<li>改写历史消息。压缩、删除早期消息、重新排序，都会让前缀从改动处开始失效。所以压缩最好是攒到一定量再一次性做，别每轮都动。</li>
+</ul>
+<p>一个最小的自检办法，不用等账单：每次请求完把 <code>usage</code> 里的两个字段打出来，算个命中占比。</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">const { prompt_cache_hit_tokens: hit = 0, prompt_cache_miss_tokens: miss = 0 } = usage</span><br><span class="line">console.log(`cache hit ${(hit / (hit + miss || 1) * 100).toFixed(1)}%`)</span><br></pre></td></tr></table></figure>
+<p>改一处提示词，看这个数掉没掉。比任何理论都直观。</p>
+<h2 id="小结"><a href="#小结" class="headerlink" title="小结"></a>小结</h2>
+<p>前缀缓存没有开关要你去配，它只要求你别乱动前面的字节。拼 system prompt 的时候，脑子里放一条线：线以上永远不变，线以下想怎么变怎么变。下一步我打算把命中占比接到 Langfuse 的 trace 上，到时候再回来看跨轮次到底是多少。</p>
+<p>参考：</p>
+<ul>
+<li><a href="https://arxiv.org/abs/2601.06007" target="_blank" rel="noopener">Don't Break the Cache: An Evaluation of Prompt Caching for Long-Horizon Agentic Tasks（arXiv:2601.06007）</a></li>
+<li><a href="https://api-docs.deepseek.com/guides/kv_cache" target="_blank" rel="noopener">DeepSeek API 文档：Context Caching</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat" target="_blank" rel="noopener">数问工作台 deepseek-db-chat</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/d7a9caf477daa1056e32df8763542774c91abcae/src/server/agent.ts" target="_blank" rel="noopener">src/server/agent.ts</a></li>
+</ul>
+    </div>
+
+    <footer class="post-footer">
+        <div class="post-tags">
+          <a href="/agent/" rel="tag"># Agent</a>
+          <a href="/agent/" rel="tag"># Prompt Caching</a>
+          <a href="/agent/" rel="tag"># 成本</a>
+          <a href="/agent/" rel="tag"># 数问工作台</a>
+        </div>
+        <div class="post-nav">
+          <div class="post-nav-next post-nav-item">
+              <a href="/2026/11/08/authorize-at-execution-boundary/" rel="next" title="权限别只在前面拦：用户点了“确认”之后，执行入口还要再查一遍">
+                <i class="fa fa-chevron-left"></i> 权限别只在前面拦：用户点了“确认”之后，执行入口还要再查一遍
+              </a>
+          </div>
+          <span class="post-nav-divider"></span>
+          <div class="post-nav-prev post-nav-item">
+              
+          </div>
+        </div>
+    </footer>
+  </div>
+  
+  
+  
+  </article>
+
+
+
+    <div class="post-spread">
+      
+    </div>
+  </div>
+
+
+          </div>
+          
+
+
+          
+
+  
+
+
+
+        </div>
+        
+          
+  
+  <div class="sidebar-toggle">
+    <div class="sidebar-toggle-line-wrap">
+      <span class="sidebar-toggle-line sidebar-toggle-line-first"></span>
+      <span class="sidebar-toggle-line sidebar-toggle-line-middle"></span>
+      <span class="sidebar-toggle-line sidebar-toggle-line-last"></span>
+    </div>
+  </div>
+
+  <aside id="sidebar" class="sidebar">
+    
+    <div class="sidebar-inner">
+
+      
+
+      
+        <ul class="sidebar-nav motion-element">
+          <li class="sidebar-nav-toc sidebar-nav-active" data-target="post-toc-wrap">
+            文章目录
+          </li>
+          <li class="sidebar-nav-overview" data-target="site-overview-wrap">
+            站点概览
+          </li>
+        </ul>
+      
+
+      <section class="site-overview-wrap sidebar-panel">
+        <div class="site-overview">
+          <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+            
+              <img class="site-author-image" itemprop="image"
+                src="https://cdn.jsdelivr.net/gh/yc2hang/cdn-assets/avatar/avatar.jpg"
+                alt="ycblue" />
+            
+              <p class="site-author-name" itemprop="name">ycblue</p>
+              <p class="site-description motion-element" itemprop="description">stay hungry, stay foolish</p>
+          </div>
+
+          <nav class="site-state motion-element">
+
+            
+              <div class="site-state-item site-state-posts">
+              
+                <a href="/archives/%7C%7Carchive">
+              
+                  <span class="site-state-item-count">30</span>
+                  <span class="site-state-item-name">日志</span>
+                </a>
+              </div>
+            
+
+            
+              
+              
+              <div class="site-state-item site-state-categories">
+                <a href="/categories/index.html">
+                  <span class="site-state-item-count">3</span>
+                  <span class="site-state-item-name">分类</span>
+                </a>
+              </div>
+            
+
+            
+              
+              
+              <div class="site-state-item site-state-tags">
+                <a href="/tags/index.html">
+                  <span class="site-state-item-count">14</span>
+                  <span class="site-state-item-name">标签</span>
+                </a>
+              </div>
+            
+
+          </nav>
+
+          
+
+          
+            <div class="links-of-author motion-element">
+                
+                  <span class="links-of-author-item">
+                    <a href="https://github.com/yc2hang" target="_blank" title="GitHub">
+                      
+                        <i class="fa fa-fw fa-github"></i>GitHub</a>
+                  </span>
+                
+                  <span class="links-of-author-item">
+                    <a href="mailto:yc2hangycz@gmail.com" target="_blank" title="E-Mail">
+                      
+                        <i class="fa fa-fw fa-envelope"></i>E-Mail</a>
+                  </span>
+                
+            </div>
+          
+
+          
+          
+
+          
+          
+
+          
+
+        </div>
+      </section>
+
+      
+      <!--noindex-->
+        <section class="post-toc-wrap motion-element sidebar-panel sidebar-panel-active">
+          <div class="post-toc">
+
+            
+              
+            
+
+            
+              <div class="post-toc-content"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#先把规则说清楚"><span class="nav-number">1.</span> <span class="nav-text">先把规则说清楚</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#数据说话"><span class="nav-number">2.</span> <span class="nav-text">数据说话</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#我的-system-prompt-是怎么拼的"><span class="nav-number">3.</span> <span class="nav-text">我的 system prompt 是怎么拼的</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#但有两个地方没那么彻底"><span class="nav-number">4.</span> <span class="nav-text">但有两个地方没那么彻底</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#几个容易踩的点"><span class="nav-number">5.</span> <span class="nav-text">几个容易踩的点</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#小结"><span class="nav-number">6.</span> <span class="nav-text">小结</span></a></li></ol></div>
+            
+
+          </div>
+        </section>
+      <!--/noindex-->
+      
+
+      
+
+    </div>
+  </aside>
+
+
+        
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="footer-inner">
+        <div class="copyright">&copy; <span itemprop="copyrightYear">2025</span>
+  <span class="with-love">
+    <i class="fa fa-heart"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">ycblue</span>
+
+  
+</div>
+
+
+  <div class="powered-by">由 <a class="theme-link" target="_blank" href="https://hexo.io">Hexo</a> 强力驱动</div>
+
+
+
+  <span class="post-meta-divider">|</span>
+
+
+
+  <div class="theme-info">主题 &mdash; <a class="theme-link" target="_blank" href="https://github.com/iissnan/hexo-theme-next">NexT.Mist</a> v5.1.4</div>
+
+
+
+
+        
+
+
+
+
+
+
+
+        
+      </div>
+    </footer>
+
+    
+      <div class="back-to-top">
+        <i class="fa fa-arrow-up"></i>
+        
+      </div>
+    
+
+    
+
+  </div>
+
+  
+
+<script type="text/javascript">
+  if (Object.prototype.toString.call(window.Promise) !== '[object Function]') {
+    window.Promise = null;
+  }
+</script>
+
+
+
+
+
+
+
+
+
+  
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+  
+  
+    <script type="text/javascript" src="/lib/jquery/index.js?v=2.1.3"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/fastclick/lib/fastclick.min.js?v=1.0.6"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/jquery_lazyload/jquery.lazyload.js?v=1.9.7"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/velocity/velocity.min.js?v=1.2.1"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/velocity/velocity.ui.min.js?v=1.2.1"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/fancybox/source/jquery.fancybox.pack.js?v=2.1.5"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/canvas-nest/canvas-nest.min.js"></script>
+  
+
+
+  
+
+
+  <script type="text/javascript" src="/js/src/utils.js?v=5.1.4"></script>
+
+  <script type="text/javascript" src="/js/src/motion.js?v=5.1.4"></script>
+
+
+
+  
+  
+
+  
+  <script type="text/javascript" src="/js/src/scrollspy.js?v=5.1.4"></script>
+<script type="text/javascript" src="/js/src/post-details.js?v=5.1.4"></script>
+
+
+
+  
+
+
+  <script type="text/javascript" src="/js/src/bootstrap.js?v=5.1.4"></script>
+
+
+
+  
+
+
+  
+
+
+
+
+	
+
+
+
+
+
+  
+
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  <script type="text/javascript">
+    // Popup Window;
+    var isfetched = false;
+    var isXml = true;
+    // Search DB path;
+    var search_path = "search.xml";
+    if (search_path.length === 0) {
+      search_path = "search.xml";
+    } else if (/json$/i.test(search_path)) {
+      isXml = false;
+    }
+    var path = "/" + search_path;
+    // monitor main search box;
+
+    var onPopupClose = function (e) {
+      $('.popup').hide();
+      $('#local-search-input').val('');
+      $('.search-result-list').remove();
+      $('#no-result').remove();
+      $(".local-search-pop-overlay").remove();
+      $('body').css('overflow', '');
+    }
+
+    function proceedsearch() {
+      $("body")
+        .append('<div class="search-popup-overlay local-search-pop-overlay"></div>')
+        .css('overflow', 'hidden');
+      $('.search-popup-overlay').click(onPopupClose);
+      $('.popup').toggle();
+      var $localSearchInput = $('#local-search-input');
+      $localSearchInput.attr("autocapitalize", "none");
+      $localSearchInput.attr("autocorrect", "off");
+      $localSearchInput.focus();
+    }
+
+    // search function;
+    var searchFunc = function(path, search_id, content_id) {
+      'use strict';
+
+      // start loading animation
+      $("body")
+        .append('<div class="search-popup-overlay local-search-pop-overlay">' +
+          '<div id="search-loading-icon">' +
+          '<i class="fa fa-spinner fa-pulse fa-5x fa-fw"></i>' +
+          '</div>' +
+          '</div>')
+        .css('overflow', 'hidden');
+      $("#search-loading-icon").css('margin', '20% auto 0 auto').css('text-align', 'center');
+
+      $.ajax({
+        url: path,
+        dataType: isXml ? "xml" : "json",
+        async: true,
+        success: function(res) {
+          // get the contents from search data
+          isfetched = true;
+          $('.popup').detach().appendTo('.header-inner');
+          var datas = isXml ? $("entry", res).map(function() {
+            return {
+              title: $("title", this).text(),
+              content: $("content",this).text(),
+              url: $("url" , this).text()
+            };
+          }).get() : res;
+          var input = document.getElementById(search_id);
+          var resultContent = document.getElementById(content_id);
+          var inputEventFunction = function() {
+            var searchText = input.value.trim().toLowerCase();
+            var keywords = searchText.split(/[\s\-]+/);
+            if (keywords.length > 1) {
+              keywords.push(searchText);
+            }
+            var resultItems = [];
+            if (searchText.length > 0) {
+              // perform local searching
+              datas.forEach(function(data) {
+                var isMatch = false;
+                var hitCount = 0;
+                var searchTextCount = 0;
+                var title = data.title.trim();
+                var titleInLowerCase = title.toLowerCase();
+                var content = data.content.trim().replace(/<[^>]+>/g,"");
+                var contentInLowerCase = content.toLowerCase();
+                var articleUrl = decodeURIComponent(data.url);
+                var indexOfTitle = [];
+                var indexOfContent = [];
+                // only match articles with not empty titles
+                if(title != '') {
+                  keywords.forEach(function(keyword) {
+                    function getIndexByWord(word, text, caseSensitive) {
+                      var wordLen = word.length;
+                      if (wordLen === 0) {
+                        return [];
+                      }
+                      var startPosition = 0, position = [], index = [];
+                      if (!caseSensitive) {
+                        text = text.toLowerCase();
+                        word = word.toLowerCase();
+                      }
+                      while ((position = text.indexOf(word, startPosition)) > -1) {
+                        index.push({position: position, word: word});
+                        startPosition = position + wordLen;
+                      }
+                      return index;
+                    }
+
+                    indexOfTitle = indexOfTitle.concat(getIndexByWord(keyword, titleInLowerCase, false));
+                    indexOfContent = indexOfContent.concat(getIndexByWord(keyword, contentInLowerCase, false));
+                  });
+                  if (indexOfTitle.length > 0 || indexOfContent.length > 0) {
+                    isMatch = true;
+                    hitCount = indexOfTitle.length + indexOfContent.length;
+                  }
+                }
+
+                // show search results
+
+                if (isMatch) {
+                  // sort index by position of keyword
+
+                  [indexOfTitle, indexOfContent].forEach(function (index) {
+                    index.sort(function (itemLeft, itemRight) {
+                      if (itemRight.position !== itemLeft.position) {
+                        return itemRight.position - itemLeft.position;
+                      } else {
+                        return itemLeft.word.length - itemRight.word.length;
+                      }
+                    });
+                  });
+
+                  // merge hits into slices
+
+                  function mergeIntoSlice(text, start, end, index) {
+                    var item = index[index.length - 1];
+                    var position = item.position;
+                    var word = item.word;
+                    var hits = [];
+                    var searchTextCountInSlice = 0;
+                    while (position + word.length <= end && index.length != 0) {
+                      if (word === searchText) {
+                        searchTextCountInSlice++;
+                      }
+                      hits.push({position: position, length: word.length});
+                      var wordEnd = position + word.length;
+
+                      // move to next position of hit
+
+                      index.pop();
+                      while (index.length != 0) {
+                        item = index[index.length - 1];
+                        position = item.position;
+                        word = item.word;
+                        if (wordEnd > position) {
+                          index.pop();
+                        } else {
+                          break;
+                        }
+                      }
+                    }
+                    searchTextCount += searchTextCountInSlice;
+                    return {
+                      hits: hits,
+                      start: start,
+                      end: end,
+                      searchTextCount: searchTextCountInSlice
+                    };
+                  }
+
+                  var slicesOfTitle = [];
+                  if (indexOfTitle.length != 0) {
+                    slicesOfTitle.push(mergeIntoSlice(title, 0, title.length, indexOfTitle));
+                  }
+
+                  var slicesOfContent = [];
+                  while (indexOfContent.length != 0) {
+                    var item = indexOfContent[indexOfContent.length - 1];
+                    var position = item.position;
+                    var word = item.word;
+                    // cut out 100 characters
+                    var start = position - 20;
+                    var end = position + 80;
+                    if(start < 0){
+                      start = 0;
+                    }
+                    if (end < position + word.length) {
+                      end = position + word.length;
+                    }
+                    if(end > content.length){
+                      end = content.length;
+                    }
+                    slicesOfContent.push(mergeIntoSlice(content, start, end, indexOfContent));
+                  }
+
+                  // sort slices in content by search text's count and hits' count
+
+                  slicesOfContent.sort(function (sliceLeft, sliceRight) {
+                    if (sliceLeft.searchTextCount !== sliceRight.searchTextCount) {
+                      return sliceRight.searchTextCount - sliceLeft.searchTextCount;
+                    } else if (sliceLeft.hits.length !== sliceRight.hits.length) {
+                      return sliceRight.hits.length - sliceLeft.hits.length;
+                    } else {
+                      return sliceLeft.start - sliceRight.start;
+                    }
+                  });
+
+                  // select top N slices in content
+
+                  var upperBound = parseInt('1');
+                  if (upperBound >= 0) {
+                    slicesOfContent = slicesOfContent.slice(0, upperBound);
+                  }
+
+                  // highlight title and content
+
+                  function highlightKeyword(text, slice) {
+                    var result = '';
+                    var prevEnd = slice.start;
+                    slice.hits.forEach(function (hit) {
+                      result += text.substring(prevEnd, hit.position);
+                      var end = hit.position + hit.length;
+                      result += '<b class="search-keyword">' + text.substring(hit.position, end) + '</b>';
+                      prevEnd = end;
+                    });
+                    result += text.substring(prevEnd, slice.end);
+                    return result;
+                  }
+
+                  var resultItem = '';
+
+                  if (slicesOfTitle.length != 0) {
+                    resultItem += "<li><a href='" + articleUrl + "' class='search-result-title'>" + highlightKeyword(title, slicesOfTitle[0]) + "</a>";
+                  } else {
+                    resultItem += "<li><a href='" + articleUrl + "' class='search-result-title'>" + title + "</a>";
+                  }
+
+                  slicesOfContent.forEach(function (slice) {
+                    resultItem += "<a href='" + articleUrl + "'>" +
+                      "<p class=\"search-result\">" + highlightKeyword(content, slice) +
+                      "...</p>" + "</a>";
+                  });
+
+                  resultItem += "</li>";
+                  resultItems.push({
+                    item: resultItem,
+                    searchTextCount: searchTextCount,
+                    hitCount: hitCount,
+                    id: resultItems.length
+                  });
+                }
+              })
+            };
+            if (keywords.length === 1 && keywords[0] === "") {
+              resultContent.innerHTML = '<div id="no-result"><i class="fa fa-search fa-5x" /></div>'
+            } else if (resultItems.length === 0) {
+              resultContent.innerHTML = '<div id="no-result"><i class="fa fa-frown-o fa-5x" /></div>'
+            } else {
+              resultItems.sort(function (resultLeft, resultRight) {
+                if (resultLeft.searchTextCount !== resultRight.searchTextCount) {
+                  return resultRight.searchTextCount - resultLeft.searchTextCount;
+                } else if (resultLeft.hitCount !== resultRight.hitCount) {
+                  return resultRight.hitCount - resultLeft.hitCount;
+                } else {
+                  return resultRight.id - resultLeft.id;
+                }
+              });
+              var searchResultList = '<ul class=\"search-result-list\">';
+              resultItems.forEach(function (result) {
+                searchResultList += result.item;
+              })
+              searchResultList += "</ul>";
+              resultContent.innerHTML = searchResultList;
+            }
+          }
+
+          if ('auto' === 'auto') {
+            input.addEventListener('input', inputEventFunction);
+          } else {
+            $('.search-icon').click(inputEventFunction);
+            input.addEventListener('keypress', function (event) {
+              if (event.keyCode === 13) {
+                inputEventFunction();
+              }
+            });
+          }
+
+          // remove loading animation
+          $(".local-search-pop-overlay").remove();
+          $('body').css('overflow', '');
+
+          proceedsearch();
+        }
+      });
+    }
+
+    // handle and trigger popup window;
+    $('.popup-trigger').click(function(e) {
+      e.stopPropagation();
+      if (isfetched === false) {
+        searchFunc(path, 'local-search-input', 'local-search-result');
+      } else {
+        proceedsearch();
+      };
+    });
+
+    $('.popup-btn-close').click(onPopupClose);
+    $('.popup').click(function(e){
+      e.stopPropagation();
+    });
+    $(document).on('keyup', function (event) {
+      var shouldDismissSearchPopup = event.which === 27 &&
+        $('.search-popup').is(':visible');
+      if (shouldDismissSearchPopup) {
+        onPopupClose();
+      }
+    });
+  </script>
+
+
+
+
+
+  
+
+  
+
+  
+
+  
+  
+
+  
+
+  
+
+  
+
+</body>
+</html>
