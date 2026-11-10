@@ -2,6 +2,73 @@
 <search>
 <!--agent-daily:start-->
   <entry>
+    <title>给 Agent 加了 maxSteps 还是会死循环：上限得套在真正重复的那条路径上</title>
+    <url>/2026/11/10/bound-the-path-that-repeats/</url>
+    <content><![CDATA[<p>第一篇写 Agent 循环的时候，我列过三道闸：最大轮数、重复调用检测、完成校验。写完觉得挺稳，<code>maxSteps</code> 都有了，还怕什么死循环。</p>
+<a id="more"></a>
+<p>前阵子看到一篇 7 月的论文，标题就叫 <a href="https://arxiv.org/abs/2607.01641" target="_blank" rel="noopener">When Agents Do Not Stop</a>，才发现我对“有上限”这件事想得太简单了。</p>
+<h2 id="论文量了什么"><a href="#论文量了什么" class="headerlink" title="论文量了什么"></a>论文量了什么</h2>
+<p>作者做了个静态分析工具 IAL-Scan，扫 Agent 代码里“反馈路径没有有效上限”的地方，把这种问题叫 Infinite Agentic Loop。我打开原文核对过的数字：扫了 6549 个 LLM Agent 仓库，工具报了 74 处，人工确认 68 处是真的，分布在 47 个项目里，准确率 91.9%。</p>
+<p>确认下来的 68 处，按模式分：</p>
+<ul>
+<li>重试反馈没有上限：17 处（25.0%）</li>
+<li>工具调用迭代没有上限：16 处（23.5%）</li>
+<li>多 Agent 对话没有轮数上限：14 处（20.6%）</li>
+<li>其余是 workflow 循环、消息重入、runner/评估器反馈</li>
+</ul>
+<p>按根因看（可以多选）：工具控制的重试占 41.2%，由模型控制终止的占 38.2%。后果方面，95.6% 会烧 API 费用。</p>
+<p>我最在意的是论文给应用开发者的两条建议。一条是别指望模型自己会停，另一条是：配置的上限必须真的罩住那条重复的路径，放在反馈路径外面的上限保护不了它。</p>
+<p>第二条我当时读了两遍。因为我的项目里确实有个 <code>maxSteps</code>，我一直默认它罩住了所有重复。</p>
+<h2 id="先看循环本身"><a href="#先看循环本身" class="headerlink" title="先看循环本身"></a>先看循环本身</h2>
+<p>数问工作台的 Agent 循环在 <a href="https://github.com/annoyc/deepseek-db-chat/blob/055e6922e6093043ef7151c60cf4a9d8ee355640/src/core/generate/generate-loop.ts#L68" target="_blank" rel="noopener"><code>src/core/generate/generate-loop.ts</code></a>，核心就是这样：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">while (stepRef.value &lt; maxSteps) {</span><br><span class="line">  signal?.throwIfAborted()</span><br><span class="line">  stepRef.value++</span><br><span class="line">  // 调模型 → 有 tool call 就执行并 continue → 没有就返回文本</span><br><span class="line">}</span><br><span class="line"></span><br><span class="line">// 走出循环，说明一直没拿到最终回复</span><br><span class="line">throw new AgentError({ type: 'max_steps', retryable: false, /* ... */ })</span><br></pre></td></tr></table></figure>
+<p>默认上限是 50（<code>AGENT_LOOP_MAX_STEPS</code>），但做数据库问答的那个 Agent 在 <a href="https://github.com/annoyc/deepseek-db-chat/blob/055e6922e6093043ef7151c60cf4a9d8ee355640/src/server/agent.ts#L381" target="_blank" rel="noopener"><code>agent.ts</code></a> 里显式传了 <code>maxSteps: 10</code>。到了上限不是悄悄停，而是抛一个不可重试的 <code>max_steps</code> 错误，让上层知道这次没跑完。这一点我觉得是对的：静默截断会让用户拿到半截答案还以为是完整的。</p>
+<p>这是第一层，管的是“一次请求里，模型和工具来回多少次”。</p>
+<h2 id="第二层同一个调用别重复"><a href="#第二层同一个调用别重复" class="headerlink" title="第二层：同一个调用别重复"></a>第二层：同一个调用别重复</h2>
+<p>只靠步数，模型可以把 10 步全花在同一个调用上。所以循环里还有一个很土的检测：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line">const currentStepKeys = stepResult.toolCalls.map(tc =&gt; makeToolCallKey(tc))</span><br><span class="line">const allDuplicate = currentStepKeys.every(key =&gt; seenToolCallKeys.has(key))</span><br><span class="line"></span><br><span class="line">if (allDuplicate) consecutiveDuplicateSteps++</span><br><span class="line">else consecutiveDuplicateSteps = 0</span><br><span class="line">currentStepKeys.forEach(key =&gt; seenToolCallKeys.add(key))</span><br><span class="line"></span><br><span class="line">if (consecutiveDuplicateSteps &gt;= 2) {</span><br><span class="line">  // 模型卡在重复调用上，强制结束</span><br><span class="line">  return { text: lastAssistantMsg(currentMessages), output: undefined, usage: totalUsage }</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p>key 是“工具名 + 参数”，参数先 <code>JSON.parse</code> 再按 key 排序后序列化。这是个小坑：同一个调用，模型两次生成的 JSON 字段顺序可能不同，直接比字符串就漏了。</p>
+<p>这段我现在回头读，有两处不满意。一是它在 return 之前往 messages 里 push 了一条“重复调用被阻止”的 tool 消息，但紧接着就 return 了，这条消息没有机会被模型看到，等于白写。二是它只认“参数完全一样”。模型要是每次把 SQL 里改个别名、加个空格，key 就变了，这一层就罩不住，只能靠第一层的 10 步兜底。</p>
+<h2 id="真正漏的地方循环外面"><a href="#真正漏的地方循环外面" class="headerlink" title="真正漏的地方：循环外面"></a>真正漏的地方：循环外面</h2>
+<p>这才是读完论文后让我出冷汗的部分。</p>
+<p>我的 Agent 不是常驻的。用户每发一条消息，服务端 <code>createDbAgent</code> 就新建一个 Agent，<code>stepRef</code> 从 0 开始，<code>seenToolCallKeys</code> 也是新的。也就是说，<code>maxSteps: 10</code> 和重复检测，都只在“一次请求”内部有效。</p>
+<p>但一个会话里，用户可以一直问，也可以每次都点“确认执行”。每次确认又是一轮新的请求。如果模型每一轮都生成一条新的 SQL，每一轮都没超过 10 步，两道闸一次都不会触发，数据库却被执行了几十次。这条反馈路径是“跨请求”的，<code>maxSteps</code> 压根没经过它。</p>
+<p>所以我在工具里另外加了会话级的上限，在 <a href="https://github.com/annoyc/deepseek-db-chat/blob/055e6922e6093043ef7151c60cf4a9d8ee355640/src/server/tools.ts#L216" target="_blank" rel="noopener"><code>src/server/tools.ts</code></a> 的 <code>execute_sql</code> 里：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br></pre></td><td class="code"><pre><span class="line">// 会话级执行次数上限</span><br><span class="line">if (sqlExecutedCount &gt;= maxSqlExecutions) {</span><br><span class="line">  return JSON.stringify({</span><br><span class="line">    status: 'limit_reached',</span><br><span class="line">    message: `本会话已执行 ${maxSqlExecutions} 条 SQL，达到上限。请基于已有的查询结果给出最终回复，不再生成新的 SQL。`,</span><br><span class="line">  })</span><br><span class="line">}</span><br><span class="line"></span><br><span class="line">// 同一次 run 内，完全相同的 SQL 直接拦</span><br><span class="line">const normalizedSql = sql.trim().replace(/\s+/g, ' ')</span><br><span class="line">if (submittedSqlSet.has(normalizedSql)) { /* duplicate_blocked */ }</span><br><span class="line"></span><br><span class="line">// 和上一轮用户已经确认过的 SQL 相同，也拦</span><br><span class="line">if (lastConfirmedSql &amp;&amp; normalizedSql === lastConfirmedSql.trim().replace(/\s+/g, ' ')) { /* duplicate_blocked */ }</span><br></pre></td></tr></table></figure>
+<p>默认上限 <code>SESSION_MAX_SQL_EXECUTIONS = 20</code>，设置里可以改，范围 1 到 100。计数从哪来？前端 <code>useChat</code> 每次请求带上 <code>executionLog.length</code> 传给服务端。快用完的时候（剩 5 次以内）还会在 system prompt 里提醒模型“次数即将用尽，尽快给出最终回复”。</p>
+<p>这里的思路就是论文那句话：上限要放在重复真正发生的那一层。重复发生在“会话里反复执行 SQL”，那计数器就得挂在执行 SQL 这个动作上，并且是会话级的，不能是 Agent 实例级的。</p>
+<h2 id="还有两个我没解决干净的"><a href="#还有两个我没解决干净的" class="headerlink" title="还有两个我没解决干净的"></a>还有两个我没解决干净的</h2>
+<p>第一，这个计数是客户端传上来的。用户打开开发者工具把 <code>sqlExecutedCount</code> 改成 0，上限就废了。所以它只是防模型失控的护栏，不是安全边界。真正拦危险 SQL 的是前几篇写过的执行入口策略，这两件事不要混着看。</p>
+<p>第二，<code>duplicate_blocked</code> 和 <code>limit_reached</code> 返回的都是一段“请直接给最终回复”的文字，靠的是模型听话。多数时候它听，但论文里 38.2% 的案例根因就是“终止由模型决定”，我没法保证它永远听。好在这几种情况下，只要它不听，继续调 <code>execute_sql</code>，最后还是会撞上第一层的 10 步。被拦下的调用不计入执行次数，所以它兜底靠的是步数，不是配额。我现在认为这个搭配是合理的，但也只是读代码得出的判断，没有做过压测。</p>
+<h2 id="自查清单"><a href="#自查清单" class="headerlink" title="自查清单"></a>自查清单</h2>
+<p>照着论文的分类，我给自己的 Agent 列了几个要问的问题，前端同学拿去检查自己的也行：</p>
+<ul>
+<li>每条会重复的路径，是不是都有计数器？重试、工具调用、子 Agent 委派、用户“再试一次”，分开看。</li>
+<li>这个计数器的生命周期，和重复的生命周期一样长吗？每次请求新建的变量，罩不住跨请求的重复。</li>
+<li>到上限时是报错还是静默？最好报错，并且让上层能区分“正常结束”和“被截断”。</li>
+<li>重试有没有退避和次数？我项目里的 <a href="https://github.com/annoyc/deepseek-db-chat/blob/055e6922e6093043ef7151c60cf4a9d8ee355640/src/core/client/retry.ts" target="_blank" rel="noopener"><code>withRetry</code></a> 是 <code>maxRetries</code> 次，指数退避加抖动，并且只重试标了 <code>retryable</code> 的错误。模型解析失败那种“让它再生成一次”的重试，同样要有上限。</li>
+<li>消息历史长到一定程度，有没有拦？论文把“状态增长”也算作放大器之一（27.9% 的案例）。</li>
+</ul>
+<h2 id="小结"><a href="#小结" class="headerlink" title="小结"></a>小结</h2>
+<p>我原来以为“加了 maxSteps”和“不会死循环”是一回事。现在觉得它们之间差着一句话：这个上限到底罩住了哪条路径。写完这篇我把会话级那个配额的数据流又过了一遍，下一步打算把客户端传计数改成服务端按会话 ID 自己记。</p>
+<p>参考：</p>
+<ul>
+<li><a href="https://arxiv.org/abs/2607.01641" target="_blank" rel="noopener">When Agents Do Not Stop: Uncovering Infinite Agentic Loops in LLM Agents（arXiv:2607.01641）</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat" target="_blank" rel="noopener">数问工作台 deepseek-db-chat</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/055e6922e6093043ef7151c60cf4a9d8ee355640/src/core/generate/generate-loop.ts" target="_blank" rel="noopener">src/core/generate/generate-loop.ts</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/055e6922e6093043ef7151c60cf4a9d8ee355640/src/server/tools.ts" target="_blank" rel="noopener">src/server/tools.ts</a></li>
+</ul>]]></content>
+    <categories>
+      <category>Agent</category>
+    </categories>
+    <tags>
+      <tag>Agent</tag>
+      <tag>Agent Loop</tag>
+      <tag>成本</tag>
+      <tag>数问工作台</tag>
+    </tags>
+  </entry>
+  <entry>
     <title>前缀缓存：system prompt 里会变的东西，一律往后放</title>
     <url>/2026/11/09/prefix-cache-dynamic-last/</url>
     <content><![CDATA[<p>前面写 Agent 循环的时候我提过一句：每一轮都要把整个 messages 重新发给模型。当时只关心“要不要压缩”，没细想另一面：既然每一步发的东西大部分都一样，服务端能不能别重复算？</p>
