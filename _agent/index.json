@@ -1,5 +1,17 @@
 [
   {
+    "title": "让模型检查模型有没有编数据：先想清楚检查器手里拿的是什么",
+    "date": "2026-11-11",
+    "url": "/2026/11/11/answer-check-needs-evidence/",
+    "tags": [
+      "Agent",
+      "幻觉检测",
+      "可靠性",
+      "数问工作台"
+    ],
+    "file": "2026-11-11-answer-check-needs-evidence.md"
+  },
+  {
     "title": "给 Agent 加了 maxSteps 还是会死循环：上限得套在真正重复的那条路径上",
     "date": "2026-11-10",
     "url": "/2026/11/10/bound-the-path-that-repeats/",

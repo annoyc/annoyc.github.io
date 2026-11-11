@@ -2,6 +2,72 @@
 <search>
 <!--agent-daily:start-->
   <entry>
+    <title>让模型检查模型有没有编数据：先想清楚检查器手里拿的是什么</title>
+    <url>/2026/11/11/answer-check-needs-evidence/</url>
+    <content><![CDATA[<p>做自然语言查库，最怕的一种回复长这样：用户问“上个月退款多少笔”，模型没调任何工具，直接答“共 1,283 笔，环比上升 12%”。格式漂亮，语气笃定，数字全是编的。</p>
+<a id="more"></a>
+<p>数问工作台里为这个加过一道检查：模型答完，再调一次模型，判断这条回复有没有编造结果，有就打回去重答。这个东西我前后改过好几回，今天把它翻出来重新读了一遍，正好最近也看了两篇讲同一件事的文章，一起记下来。</p>
+<h2 id="第一版只给了两个布尔值"><a href="#第一版只给了两个布尔值" class="headerlink" title="第一版：只给了两个布尔值"></a>第一版：只给了两个布尔值</h2>
+<p>最早的检查器拿到的输入只有三样：助手的回复文本、<code>hasToolCalls</code>（这一轮有没有调工具）、<code>isContinuation</code>（会话里有没有真实的 SQL 执行记录）。prompt 里还有一条“最高优先级规则”，这是 6 月那个版本的原话：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">如果 isContinuation = true，说明助手的上下文中包含真实的 SQL 执行结果。</span><br><span class="line">此时助手回复中出现的任何具体数据（姓名、手机号、邮箱、数字、ID、状态值等）</span><br><span class="line">都应被视为来自真实执行结果或会话历史记录，不算幻觉。</span><br></pre></td></tr></table></figure>
+<p>现在看这条规则问题很大。它的意思是：只要这个会话里执行过 SQL，后面回复里出现什么数字都放行。可“执行过 SQL”和“这个数字出自那次执行”是两回事。查了一张 5 行的用户表，接着编一个全站 GMV，检查器照样说没问题。</p>
+<p>当时我没意识到这点，反而觉得检查得不够细，又加了一项“事实校验”：把 SQL 结果的统计摘要也传过去，让检查器判断回复里的数字和摘要是否矛盾，输出 <code>hasFactError</code> 和一段 <code>factErrorDetail</code>。</p>
+<p>这项功能只活了一天，第二天就撤了。撤掉它的那次提交，说明里我写的是：the LLM-based fact-checking was itself hallucinating incorrect validation claims。让模型对着一份统计摘要挑数字的错，它挑出来的“错”有一部分是它自己编的。而检查器一旦判了可疑，前端会清空这条回复、让模型重答，所以误判的代价是一条本来正确的答案在用户眼前消失。</p>
+<h2 id="两篇文章说的是同一件事"><a href="#两篇文章说的是同一件事" class="headerlink" title="两篇文章说的是同一件事"></a>两篇文章说的是同一件事</h2>
+<p>DEV 上有篇 <a href="https://dev.to/saurav_bhattacharya/hallucination-is-not-a-vibe-how-to-actually-detect-ungrounded-claims-in-agent-output-349l" target="_blank" rel="noopener">Hallucination is not a vibe</a>，里面有句话我很认同：幻觉检测是个埋点问题，跟模型质量关系没那么大。大部分团队测不了幻觉，是因为一次运行结束后只留了最终答案，工具输出和检索到的上下文都扔了。没有这些，所谓的检查就是让一个模型凭感觉给另一个模型打分。</p>
+<p>作者把“幻觉”拆成三种，各自要用不同的办法查：</p>
+<ul>
+<li>模型没用给它的数据，凭训练记忆答的（有时候碰巧还答对了）</li>
+<li>引用了上下文里根本不存在的 ID、字段、数字</li>
+<li>每条事实都有出处，但结论推不出来</li>
+</ul>
+<p>他的建议是前两种用确定性的集合比对，回复里提到的引用在不在证据里，一个 <code>includes</code> 就能判；只有第三种才交给模型当裁判。</p>
+<p>另一篇是 3 月的 arXiv 论文 <a href="https://arxiv.org/abs/2603.10060" target="_blank" rel="noopener">Tool Receipts, Not Zero-Knowledge Proofs</a>，走得更远：运行时给每次工具执行签一张 HMAC 回执，模型伪造不了，然后把回复里的说法逐条和回执对。作者自建了一个 1800 个场景、四种语言、六类注入幻觉的测试集，报告的检出率是：编造工具引用 94.2%，数量说错 87.6%，谎称“没查到”91.3%，每条回复的校验开销在 15ms 以内。数字是作者在自己的基准上测的，我没见到第三方复现，看个量级就好。</p>
+<p>两篇的共同点很直白：检查得对着工具真实返回的东西做，只盯着回复本身查不出什么。我那两个布尔值，就是把证据压缩成了“有/没有”，信息全丢了。</p>
+<h2 id="现在的版本把证据原样递过去"><a href="#现在的版本把证据原样递过去" class="headerlink" title="现在的版本：把证据原样递过去"></a>现在的版本：把证据原样递过去</h2>
+<p>现在的检查器在 <a href="https://github.com/annoyc/deepseek-db-chat/blob/bcca41f71a373709120cd225fd72946984417c83/src/server/functions/classify-hallucination.ts#L16" target="_blank" rel="noopener"><code>src/server/functions/classify-hallucination.ts</code></a>，prompt 开头几句把那条“最高优先级规则”整个反过来了：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">只有 evidence 中的数据可以作为数值依据；hasToolCalls 和 isContinuation</span><br><span class="line">仅表示流程状态，不证明任何具体数字正确。</span><br></pre></td></tr></table></figure>
+<p>证据由 <a href="https://github.com/annoyc/deepseek-db-chat/blob/bcca41f71a373709120cd225fd72946984417c83/src/lib/answer-check.ts#L11" target="_blank" rel="noopener"><code>src/lib/answer-check.ts</code></a> 里的 <code>buildAnswerCheckEvidence</code> 拼出来：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br></pre></td><td class="code"><pre><span class="line">const METADATA_TOOLS = new Set(['list_tables', 'get_database_overview', 'get_table_schema'])</span><br><span class="line"></span><br><span class="line">export function buildAnswerCheckEvidence(sqlResults: string | undefined, toolCalls: readonly ToolCallInfo[]): string | undefined {</span><br><span class="line">  const metadata = new Map&lt;string, { tool: string; args: Record&lt;string, unknown&gt;; result: string }&gt;()</span><br><span class="line">  for (const tool of toolCalls) {</span><br><span class="line">    if (!METADATA_TOOLS.has(tool.name) || tool.status !== 'completed' || tool.error || !tool.result?.trim()) continue</span><br><span class="line">    metadata.set(`${tool.name}:${JSON.stringify(tool.args)}`, { tool: tool.name, args: tool.args, result: tool.result })</span><br><span class="line">  }</span><br><span class="line">  if (!sqlResults?.trim() &amp;&amp; metadata.size === 0) return undefined</span><br><span class="line">  return JSON.stringify({</span><br><span class="line">    sqlResults: sqlResults || undefined,</span><br><span class="line">    metadata: [...metadata.values()],</span><br><span class="line">  })</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p>这里有三个决定。</p>
+<p>第一，证据分两类。<code>sqlResults</code> 是用户确认后真正执行的 SQL 结果，<code>metadata</code> 是表清单、表结构这类工具返回。分开是因为它们能证明的东西不一样：有了 <code>list_tables</code> 的结果，回答“库里有几张表”就不算编造；但拿着表结构去说“订单表上个月有 3 万条记录”就是编。metadata 这一类是 10 月底才加的。在那之前证据里只有 SQL 结果，用户问“库里有几张表”，模型调 <code>list_tables</code> 老老实实答了，在检查器眼里却是“没有执行证据就给了数字”。</p>
+<p>第二，只收成功的工具调用。<code>status !== 'completed'</code>、有 <code>error</code>、结果为空的都跳过。失败的调用不能当证据，这听起来像废话，但第一版的 <code>hasToolCalls</code> 恰恰是“调了就算”，不管成没成功。</p>
+<p>第三，同一个工具同样的参数只留最后一次。key 是工具名加参数，后面的覆盖前面的，避免表结构被重复塞好几遍。</p>
+<p>prompt 里还交代了证据的边界：概览里的 <code>~N rows</code> 是近似行数，不能当精确记录数；结果被截断时，不能把样本统计说成全表指标。</p>
+<h2 id="查不出来不等于没问题"><a href="#查不出来不等于没问题" class="headerlink" title="查不出来，不等于没问题"></a>查不出来，不等于没问题</h2>
+<p>检查器本身也是一次模型调用，会超时，会输出不合法的 JSON。解析函数是这么写的：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line">/** A failed check is unknown, never evidence that an answer is correct. */</span><br><span class="line">export function parseAnswerCheck(text: string): AnswerCheck {</span><br><span class="line">  try {</span><br><span class="line">    const match = text.match(/\{[\s\S]*\}/)</span><br><span class="line">    const result = match ? JSON.parse(match[0]) : null</span><br><span class="line">    if (typeof result?.hasFakeResult !== 'boolean') return { hasFakeResult: null, status: 'unavailable' }</span><br><span class="line">    return { hasFakeResult: result.hasFakeResult, status: result.hasFakeResult ? 'suspected' : 'not_detected' }</span><br><span class="line">  } catch {</span><br><span class="line">    return { hasFakeResult: null, status: 'unavailable' }</span><br><span class="line">  }</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p>返回值是三态的：<code>suspected</code>、<code>not_detected</code>、<code>unavailable</code>。以前失败时直接返回 <code>hasFakeResult: false</code>，等于把“我没查成”说成了“查过了没问题”。前端写多了会有这个习惯，接口挂了给个默认值让页面别崩。但在这里默认值是有含义的，<code>false</code> 就是一个结论。</p>
+<p>命名上也改过：<code>not_detected</code> 而不叫 <code>ok</code> 或 <code>verified</code>。检查器没发现问题，只能说明没发现。</p>
+<h2 id="还没补上的洞"><a href="#还没补上的洞" class="headerlink" title="还没补上的洞"></a>还没补上的洞</h2>
+<p>读完调用方 <a href="https://github.com/annoyc/deepseek-db-chat/blob/bcca41f71a373709120cd225fd72946984417c83/src/hooks/useChat.tsx#L578" target="_blank" rel="noopener"><code>useChat.tsx</code></a> 那段，我给自己记了四条。</p>
+<p>一，三态只做到了一半。调用方写的是 <code>if (classification.hasFakeResult)</code>，<code>null</code> 和 <code>false</code> 走的是同一条路，界面上也没有任何地方展示“本次未能检查”。类型上区分了，行为上没区分，用户感知不到。</p>
+<p>二，SQL 证据只取了最近一次的结果。如果模型在回复里对比“这次”和“上一次”的查询，上一次的数字不在证据里，有可能被误判成编造。我还没遇到真实案例，但从代码上看这条路径是存在的。</p>
+<p>三，只纠正一次。<code>retryCount &lt; 1</code> 才检查，被打回重答的那条回复不会再过检查器。这是有意的，再查下去就是昨天那篇讲的无上限反馈路径。代价是第二次如果还在编，就直接到用户眼前了。</p>
+<p>四，裁判还是模型。我的检查项里其实有一大块是 DEV 那篇说的“确定性能判的”：回复里的数字在不在结果集里。这部分完全可以先用代码过一遍：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">// 设想中的前置检查，项目里还没有</span><br><span class="line">function findUngroundedNumbers(answer: string, evidence: string): string[] {</span><br><span class="line">  const claimed = answer.match(/\d[\d,]*(?:\.\d+)?/g) ?? []</span><br><span class="line">  const pool = new Set((evidence.match(/\d[\d,]*(?:\.\d+)?/g) ?? []).map(n =&gt; n.replace(/,/g, '')))</span><br><span class="line">  return claimed</span><br><span class="line">    .map(n =&gt; n.replace(/,/g, ''))</span><br><span class="line">    .filter(n =&gt; n.length &gt;= 3 &amp;&amp; !pool.has(n))  // 太短的数字误报多，先放过</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p>它会有误报，比如模型把两行加了个总和，或者把 0.1234 写成 12.34%。所以我的想法是让它只做粗筛：一个超出证据的数字都没有，就不用花钱调检查器；有的话，把这几个数字点名递给检查器，让它只判断这几个能不能从证据里算出来。问题范围越小，裁判越不容易自己编。</p>
+<h2 id="小结"><a href="#小结" class="headerlink" title="小结"></a>小结</h2>
+<p>这几轮改下来，prompt 写得多漂亮其实不太要紧，我学到的主要是一件事：检查器的上限取决于递给它的证据。给它两个布尔值，它只能猜；给它工具的真实返回，它才有东西可对。下一步先把那个数字粗筛加上，再把 <code>unavailable</code> 在界面上显示出来。</p>
+<p>参考：</p>
+<ul>
+<li><a href="https://dev.to/saurav_bhattacharya/hallucination-is-not-a-vibe-how-to-actually-detect-ungrounded-claims-in-agent-output-349l" target="_blank" rel="noopener">Hallucination is not a vibe: how to actually detect ungrounded claims in agent output（DEV Community）</a></li>
+<li><a href="https://arxiv.org/abs/2603.10060" target="_blank" rel="noopener">Tool Receipts, Not Zero-Knowledge Proofs: Practical Hallucination Detection for AI Agents（arXiv:2603.10060）</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat" target="_blank" rel="noopener">数问工作台 deepseek-db-chat</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/bcca41f71a373709120cd225fd72946984417c83/src/lib/answer-check.ts" target="_blank" rel="noopener">src/lib/answer-check.ts</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/bcca41f71a373709120cd225fd72946984417c83/src/server/functions/classify-hallucination.ts" target="_blank" rel="noopener">src/server/functions/classify-hallucination.ts</a></li>
+</ul>]]></content>
+    <categories>
+      <category>Agent</category>
+    </categories>
+    <tags>
+      <tag>Agent</tag>
+      <tag>幻觉检测</tag>
+      <tag>可靠性</tag>
+      <tag>数问工作台</tag>
+    </tags>
+  </entry>
+  <entry>
     <title>给 Agent 加了 maxSteps 还是会死循环：上限得套在真正重复的那条路径上</title>
     <url>/2026/11/10/bound-the-path-that-repeats/</url>
     <content><![CDATA[<p>第一篇写 Agent 循环的时候，我列过三道闸：最大轮数、重复调用检测、完成校验。写完觉得挺稳，<code>maxSteps</code> 都有了，还怕什么死循环。</p>
