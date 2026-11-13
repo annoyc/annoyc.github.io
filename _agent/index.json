@@ -1,5 +1,17 @@
 [
   {
+    "title": "比对 SQL 结果集：strict 44%，relaxed 89%，差的那一半全是模型多给的列",
+    "date": "2026-11-13",
+    "url": "/2026/11/13/result-set-compare-relaxed-strict/",
+    "tags": [
+      "Agent",
+      "评测",
+      "Text-to-SQL",
+      "数问工作台"
+    ],
+    "file": "2026-11-13-result-set-compare-relaxed-strict.md"
+  },
+  {
     "title": "给 Agent 打分，别读它最后那段话：我的评测只看它留下了什么",
     "date": "2026-11-12",
     "url": "/2026/11/12/grade-what-agent-did/",

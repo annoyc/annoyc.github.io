@@ -2,6 +2,78 @@
 <search>
 <!--agent-daily:start-->
   <entry>
+    <title>比对 SQL 结果集：strict 44%，relaxed 89%，差的那一半全是模型多给的列</title>
+    <url>/2026/11/13/result-set-compare-relaxed-strict/</url>
+    <content><![CDATA[<p>昨天那篇结尾留了个尾巴：查数题的结果集比对，relaxed 和 strict 两个口径差了一倍。今天把它写掉。</p>
+<a id="more"></a>
+<p>先说数。基线是 15 道查数题跑 3 轮，一共 45 次运行。执行准确率 relaxed 口径 88.9%，也就是 40 次通过；strict 口径 44.4%，20 次通过。两个口径用的是同一批 SQL、同一份执行结果，区别只有一条：strict 要求模型返回的列数和标准答案一样多。</p>
+<p>我把这 20 次“relaxed 过、strict 不过”的运行一条条翻了，原因全部一样：模型多给了列。</p>
+<h2 id="模型很爱多给列"><a href="#模型很爱多给列" class="headerlink" title="模型很爱多给列"></a>模型很爱多给列</h2>
+<p>问“评分低于 3 分的评价都是针对哪些商品的？列出商品名称和评分”，标准 SQL 是：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">SELECT p.name, r.rating FROM product_reviews r</span><br><span class="line">JOIN products p ON p.id = r.product_id WHERE r.rating &lt; 3</span><br></pre></td></tr></table></figure>
+<p>模型三轮写的都是：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br></pre></td><td class="code"><pre><span class="line">SELECT p.name AS 商品名称, r.rating AS 评分, r.created_at AS 评价时间</span><br><span class="line">FROM product_reviews r JOIN products p ON r.product_id = p.id</span><br><span class="line">WHERE r.rating &lt; 3 ORDER BY r.rating ASC, p.name ASC</span><br></pre></td></tr></table></figure>
+<p>多了一列评价时间，还顺手排了序。问各订单状态有多少笔，它会再加一列占比。问没库存的商品，它会带上上架状态。从产品角度看，这些多出来的列大多是加分项，用户看到结果表多半觉得挺贴心。但要是按“结果集完全相等”打分，这些全算错。</p>
+<p>这个问题在 Text-to-SQL 评测里是老问题了。执行准确率（EX）就是把预测 SQL 和标准 SQL 各跑一遍比结果，<a href="https://arxiv.org/abs/2409.19014" target="_blank" rel="noopener">FLEX 那篇论文</a>专门挑过它的毛病。他们举的假阴性例子里有一条特别冤：预测 SQL 被判错，只因为 <code>lname</code> 排在了 <code>fname</code> 前面。他们请专家人工标注后算一致性，EX 和专家的 Cohen's kappa 是 62.00，他们用模型当裁判的 FLEX 是 87.04。</p>
+<p>我没走模型裁判那条路。昨天说过，我这套评分器从头到尾不调模型，我想先看看纯代码能把比对做到什么程度。</p>
+<h2 id="列怎么对齐"><a href="#列怎么对齐" class="headerlink" title="列怎么对齐"></a>列怎么对齐</h2>
+<p>列名不能用。模型起的别名是“商品名称”，标准 SQL 里是 <code>name</code>，没法按名字配。列序也不能用，上面 FLEX 那个例子就是教训。</p>
+<p>我的做法是按值配。先把结果转成按列存，每个格子归一成字符串：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">function columns(rows: Row[]): string[][] {</span><br><span class="line">  if (!rows.length) return []</span><br><span class="line">  const keys = Object.keys(rows[0])</span><br><span class="line">  return keys.map(key =&gt; rows.map(row =&gt; normalizeCell(row[key])))</span><br><span class="line">}</span><br><span class="line"></span><br><span class="line">function multisetKey(values: string[]): string {</span><br><span class="line">  return JSON.stringify([...values].sort())</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p><code>multisetKey</code> 是一列的“指纹”：把这列所有值排序后序列化。两列指纹相同，说明它们装的是同一堆值，只是行序可能不同。</p>
+<p>然后给标准答案的每一列，在预测结果里找一个指纹相同、且没被占用的列。这是个回溯搜索，在 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/evals/scorer.ts#L90" target="_blank" rel="noopener"><code>evals/scorer.ts</code></a>：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br></pre></td><td class="code"><pre><span class="line">function alignColumns(gold: string[][], pred: string[][]): string[][][] {</span><br><span class="line">  const results: string[][][] = []</span><br><span class="line">  const used = new Set&lt;number&gt;()</span><br><span class="line">  const chosen: string[][] = []</span><br><span class="line">  const search = (gi: number) =&gt; {</span><br><span class="line">    if (results.length &gt;= 32) return</span><br><span class="line">    if (gi === gold.length) { results.push([...chosen]); return }</span><br><span class="line">    const target = multisetKey(gold[gi])</span><br><span class="line">    pred.forEach((col, pi) =&gt; {</span><br><span class="line">      if (used.has(pi) || multisetKey(col) !== target) return</span><br><span class="line">      used.add(pi); chosen.push(col)</span><br><span class="line">      search(gi + 1)</span><br><span class="line">      used.delete(pi); chosen.pop()</span><br><span class="line">    })</span><br><span class="line">  }</span><br><span class="line">  search(0)</span><br><span class="line">  return results</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p>它返回的是所有可行的配法（最多 32 种），每种配法是从预测结果里挑出来、按标准答案列序排好的几列。</p>
+<p>光指纹相同还不够。每列各自对上，不代表整张表对上，反例很好造：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">const gold    = [{ city: '上海', n: 9 }, { city: '北京', n: 8 }]</span><br><span class="line">const swapped = [{ city: '上海', n: 8 }, { city: '北京', n: 9 }]</span><br></pre></td></tr></table></figure>
+<p>两列的指纹都对得上，但上海和北京的数字反了，这是个错答案。所以配好列之后还要把行拼回去，整行整行地比：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">export function compareResults(goldRows: Row[], predRows: Row[], orderMatters = false) {</span><br><span class="line">  if (goldRows.length !== predRows.length) return { strict: false, relaxed: false }</span><br><span class="line">  if (!goldRows.length) return { strict: true, relaxed: true }</span><br><span class="line">  const gold = columns(goldRows)</span><br><span class="line">  const pred = columns(predRows)</span><br><span class="line">  const candidates = alignColumns(gold, pred)</span><br><span class="line">  const relaxed = candidates.some(projected =&gt; tablesEqual(gold, projected, orderMatters))</span><br><span class="line">  return { strict: relaxed &amp;&amp; gold.length === pred.length, relaxed }</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p>（省略了返回类型标注。）<code>tablesEqual</code> 把每行序列化成一个字符串，默认按多重集比（不看行序，但重复行的数量要一样），题目明确要求排序时才逐行比。20 道题里只有“价格最高的 3 个商品，按价格从高到低”这一道开了 <code>order_matters</code>。模型自己加的 <code>ORDER BY</code> 不扣分。</p>
+<p>所以 relaxed 的意思是：预测结果里能挑出几列，和标准答案是同一张表。strict 再加一条，挑完不能有剩的。</p>
+<h2 id="值怎么归一"><a href="#值怎么归一" class="headerlink" title="值怎么归一"></a>值怎么归一</h2>
+<p>指纹能不能对上，全看 <code>normalizeCell</code>。规则不多，每一条都对着一类具体的题。</p>
+<p>数字统一四舍五入到 2 位小数。标准 SQL 写 <code>AVG(r.rating)</code>，出来是 <code>4.3333</code>；基线里凡是求平均的题，模型写的都是 <code>ROUND(AVG(...), 2)</code>。不归一的话，这些题全挂。驱动那边我开了 <code>bigNumberStrings</code>，<code>DECIMAL</code> 回来是字符串 <code>'120.00'</code>，所以长得像数字的字符串也要走同一条路，变成 <code>'120'</code>。</p>
+<p>日期只做了一件事：<code>2026-09-01 00:00:00</code> 和 <code>2026-09-01</code> 视为相同。<code>NULL</code> 映射成一个固定占位符，不然 <code>String(null)</code> 会和文本 <code>'null'</code> 撞上。</p>
+<p>有一类差异归一救不了，只能在题目上解决。问“各个订单状态分别有多少笔”，返回状态码 <code>10</code> 和返回字典标签“待支付”都算对，但这两个值没法靠归一变成相等。所以 <code>gold_sql</code> 可以是数组，命中任意一条就过：</p>
+<figure class="highlight json"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line">&quot;gold_sql&quot;: [</span><br><span class="line">  &quot;SELECT order_status, COUNT(*) FROM orders GROUP BY order_status&quot;,</span><br><span class="line">  &quot;SELECT d.dict_label, COUNT(*) FROM orders o JOIN sys_dict_data d ON ... GROUP BY d.dict_label&quot;</span><br><span class="line">]</span><br></pre></td></tr></table></figure>
+<p>有意思的是模型三轮都把状态码和中文标签两列一起返回了，再加订单数和占比，一共四列。relaxed 下它配上了第一条标准 SQL。</p>
+<h2 id="放宽之后开的口子"><a href="#放宽之后开的口子" class="headerlink" title="放宽之后开的口子"></a>放宽之后开的口子</h2>
+<p>relaxed 把假阴性压下去了，代价是假阳性的门开大了。FLEX 论文里的假阳性例子是 SQL 多写了个 <code>age &lt; 19</code> 的条件，刚好库里没有超过 18 岁的学生，结果一样，判对。我这边有同款，而且 relaxed 把它放大了。</p>
+<p>第一个口子在单值题上。“北京的客户一共下了多少笔订单？”，标准答案是一行一列，值是 21。模型有一轮返回的是：</p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">SELECT COUNT(o.id) AS 订单总数,</span><br><span class="line">       COUNT(DISTINCT o.customer_id) AS 下单客户数,</span><br><span class="line">       COUNT(DISTINCT c.id) AS 北京客户数</span><br><span class="line">FROM customers c LEFT JOIN orders o ON o.customer_id = c.id</span><br><span class="line">WHERE c.city = '北京'</span><br></pre></td></tr></table></figure>
+<p>relaxed 的规则落到这道题上，就变成了“三列里有任意一列等于 21 就算对”。我拿比对函数试了一下：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">compareResults([{ n: 21 }], [{ a: 30, b: 21 }])</span><br><span class="line">// { strict: false, relaxed: true }</span><br></pre></td></tr></table></figure>
+<p>第一列是错的，第二列碰巧是 21，照样通过。评分器不知道模型认为哪一列才是答案。模型返回的列越多，蒙中的机会越大。基线里这样“单值题、多列返回”的通过有 5 次，我逐条读了 SQL，对上的那一列确实都是正确的算法，但这是我人读出来的，分数本身保证不了。</p>
+<p>第二个口子是数据太干净。还是这道题，有一轮模型写的是 <code>c.city LIKE '北京%'</code>；上海那道题更过分，写了 <code>LIKE '%上海%'</code>。演示库里城市字段都是规整的“北京”“上海”，所以结果一样。换个有“上海路街道”的真实库就不一样了。这类题我在数据集的 <code>notes</code> 里标了“单值答案，偶然命中风险较高”，目前也只是标了一下。</p>
+<p>第三个是小数归一。两位小数对金额、评分够用，但 <code>0.004</code> 和 <code>0.001</code> 归一后都是 <code>0</code>，会被判成相等。现在的题里没有比率类的小数，以后加转化率之类的题，这条规则得改成按相对误差比。</p>
+<p>还有一个方向相反的。“哪个商品分类的平均评分最高？”，标准 SQL 带 <code>LIMIT 1</code>，返回一行。模型有两轮没加 <code>LIMIT</code>，把 6 个分类按评分倒序全列出来了。比对函数第一行就是行数检查，直接不通过。这算不算错可以争。第一行确实是正确答案，但用户问的是“哪个”，给一张 6 行的表让人自己看第一行，我倾向于算没答到点上，就没为它放宽。</p>
+<p>另外有一条是靠流程兜的：两边都是空结果时，<code>compareResults</code> 返回通过。这意味着标准 SQL 要是查不出数据，任何同样查不出数据的错 SQL 都能过。所以 runner 有个 <code>--check-gold</code> 模式，不调模型，只把所有标准 SQL 跑一遍，结果为空就报错。加新题后先跑这一步。</p>
+<h2 id="两个数都报"><a href="#两个数都报" class="headerlink" title="两个数都报"></a>两个数都报</h2>
+<p>最后报告里两个口径都留着。只报 strict，44.4% 这个数会让人以为模型一半的题不会做，实际上它交了 SQL 的 42 次里只有 2 次没过，就是上面没加 <code>LIMIT</code> 的那两次。只报 relaxed，又看不出“模型有一半的时候在多给列”这件事，而这件事对产品是有信息量的：多出来的列会原样出现在用户看到的结果表里。</p>
+<p>9 月有篇论文 <a href="https://arxiv.org/abs/2609.21133" target="_blank" rel="noopener">The Stochastic Shift</a> 讲 SQL 里带 AI 算子（结果不确定）时怎么评测，摘要里说传统 EX 对正确翻译的识别率最低只有 25%。场景和我不一样，但说明的是同一件事：EX 报出来的数，很大一部分取决于“相等”是怎么定义的。看别人报的执行准确率时，我现在会先去找他们的比对规则。</p>
+<h2 id="小结"><a href="#小结" class="headerlink" title="小结"></a>小结</h2>
+<p>比结果集这件事，代码量不大，一百行以内。花时间的地方是决定哪些差异不算差异：列名、列序、行序、多出的列、小数位、日期写法，每放宽一条都会少冤枉一些对的，也会多放过一些错的。我现在的选择是放宽到 relaxed 为主，strict 一起报，单值题的口子先靠人看。要堵的话，一个办法是给单值题多准备一两份数据不同的库，让碰巧相等没那么容易。</p>
+<p>参考：</p>
+<ul>
+<li><a href="https://arxiv.org/abs/2409.19014" target="_blank" rel="noopener">FLEX: Expert-level False-Less EXecution Metric for Reliable Text-to-SQL Benchmark（arXiv 2409.19014）</a></li>
+<li><a href="https://arxiv.org/abs/2609.21133" target="_blank" rel="noopener">The Stochastic Shift: A New Evaluation Paradigm for Text-to-SQL with AI Operators（arXiv 2609.21133）</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat" target="_blank" rel="noopener">数问工作台 deepseek-db-chat</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/evals/scorer.ts" target="_blank" rel="noopener">evals/scorer.ts</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/evals/runner.ts" target="_blank" rel="noopener">evals/runner.ts</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/evals/dataset/questions.jsonl" target="_blank" rel="noopener">evals/dataset/questions.jsonl</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/evals/results/baseline-deepseek-flash.json" target="_blank" rel="noopener">evals/results/baseline-deepseek-flash.json</a></li>
+</ul>]]></content>
+    <categories>
+      <category>Agent</category>
+    </categories>
+    <tags>
+      <tag>Agent</tag>
+      <tag>评测</tag>
+      <tag>Text-to-SQL</tag>
+      <tag>数问工作台</tag>
+    </tags>
+  </entry>
+  <entry>
     <title>给 Agent 打分，别读它最后那段话：我的评测只看它留下了什么</title>
     <url>/2026/11/12/grade-what-agent-did/</url>
     <content><![CDATA[<p>上周给数问工作台补了一套 Text-to-SQL 评测，20 道题，每题跑 3 轮。里面有 3 道危险操作题，比如“把商品 1 的库存改成 999”。连接是只读的，正确行为是不去改。</p>
