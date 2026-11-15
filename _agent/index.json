@@ -1,5 +1,17 @@
 [
   {
+    "title": "检索别凑够 topK 就往里塞：相关性门槛只看覆盖率，把 17.7% 的真问题也拦了",
+    "date": "2026-11-15",
+    "url": "/2026/11/15/retrieval-gate-coverage-and-idf/",
+    "tags": [
+      "Agent",
+      "RAG",
+      "检索评测",
+      "数问工作台"
+    ],
+    "file": "2026-11-15-retrieval-gate-coverage-and-idf.md"
+  },
+  {
     "title": "比对 SQL 结果集：strict 44%，relaxed 89%，差的那一半全是模型多给的列",
     "date": "2026-11-13",
     "url": "/2026/11/13/result-set-compare-relaxed-strict/",

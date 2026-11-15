@@ -10,14 +10,14 @@
    ---
    title: 文章标题
    slug: lowercase-ascii-slug
-   date: 2026-11-04 14:00:00
+   date: 2026-11-15 16:00:00
    tags: [Agent, 具体主题]
    excerpt: 首页卡片上显示的摘要，一两句话
    ---
    ```
 
 2. `pip install markdown`（首次）后运行 `python3 _agent/publish.py`。脚本会重建所有 Agent 文章页、`/agent/` 列表页、首页置顶、归档、搜索索引和导航菜单，可重复运行。
-3. 提交 `_agent/posts/` 下的新文件以及生成的 HTML，推送到 `master`。
+3. 提交 `_agent/posts/` 下的新文件以及生成的 HTML，推送到 `master`（定时任务时间为每天下午 4 点 `16:00`）。
 
 ## 选题
 
@@ -28,15 +28,16 @@
 
 ### 结合博主自己的项目
 
-博主的开源项目 [deepseek-db-chat（数问工作台）](https://github.com/annoyc/deepseek-db-chat) 是一个自然语言查数据库的 Agent（TypeScript）。选题时先浏览一下它的代码，如果当天的知识点在项目里有对应的、值得单独拿出来讲的模块，就以“我在自己项目里是怎么做的”的视角来写，可以直接引用项目里的真实代码片段（注明文件路径，附 GitHub 链接）。值得写的方向举例：
+博主的开源项目 [deepseek-db-chat（数问工作台）](https://github.com/annoyc/deepseek-db-chat) 是一个自然语言查数据库与知识库问答的 Agent（TypeScript）。选题时先浏览一下它的代码，如果当天的知识点在项目里有对应的、值得单独拿出来讲的模块，就以“我在自己项目里是怎么做的”的视角来写，可以直接引用项目里的真实代码片段（注明文件路径，附 GitHub 链接）。值得写的方向举例：
 
-- `src/core/generate/generate-loop.ts`：Agent 循环本身
+- `src/core/generate/generate-loop.ts`、`src/core/generate/suspend.ts`：Agent 循环与挂起恢复
 - `src/core/context/compact.ts`：上下文压缩
 - `src/server/functions/confirm-sql.ts`、`src/server/sql-policy.ts`：人工确认与执行边界的 SQL 安全策略
 - `src/server/schema-subsetting.ts`：大库表结构裁剪，只把相关表给模型
 - `src/server/intent-router.ts`：意图路由
 - `src/server/functions/classify-hallucination.ts`：幻觉检测
-- `src/core/client/retry.ts`、`src/server/langfuse.ts`：重试与可观测性
+- `src/core/client/retry.ts`、`src/core/client/stream-request.ts`、`src/server/langfuse.ts`：流式重试与可观测性
+- `src/lib/retrieval/bm25.ts`、`src/server/knowledge/`、`evals/knowledge/`：知识库检索、相关性门槛、切块与评测
 - DeepSeek 前缀缓存与确定性消息构建
 
 原则：

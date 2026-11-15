@@ -1,0 +1,1053 @@
+<!DOCTYPE html>
+
+
+
+  
+
+
+<html class="theme-next mist use-motion" lang="zh-Hans">
+<head>
+  <meta charset="UTF-8"/>
+<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+<meta name="theme-color" content="#222">
+
+
+
+
+
+
+
+
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+  
+  <link href="/lib/fancybox/source/jquery.fancybox.css?v=2.1.5" rel="stylesheet" type="text/css" />
+
+
+
+
+
+
+
+<link href="/lib/font-awesome/css/font-awesome.min.css?v=4.6.2" rel="stylesheet" type="text/css" />
+
+<link href="/css/main.css?v=5.1.4" rel="stylesheet" type="text/css" />
+
+
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png?v=5.1.4">
+
+
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png?v=5.1.4">
+
+
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png?v=5.1.4">
+
+
+  <link rel="mask-icon" href="/images/logo.svg?v=5.1.4" color="#222">
+
+
+
+
+
+  <meta name="keywords" content="Agent,RAG,检索评测,数问工作台," />
+
+
+
+
+
+
+
+
+
+
+<meta name="description" content="问一份上传的简历“其博客链接是什么”，回答却引用了两份电力市场规则，因为“个人”二字撞上了规则里的“任何单位和个人”，而检索默认塞满 6 个槽位。这篇讲数问工作台给 BM25 加相关性门槛时踩的两个坑：为什么不能靠提示词让模型自己忽略噪音，以及只看覆盖率为什么会误杀 17.7% 的口语化问题。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="检索别凑够 topK 就往里塞：相关性门槛只看覆盖率，把 17.7% 的真问题也拦了">
+<meta property="og:url" content="http://yc-sky.top/2026/11/15/retrieval-gate-coverage-and-idf/index.html">
+<meta property="og:site_name" content="Yc的博客">
+<meta property="og:description" content="问一份上传的简历“其博客链接是什么”，回答却引用了两份电力市场规则，因为“个人”二字撞上了规则里的“任何单位和个人”，而检索默认塞满 6 个槽位。这篇讲数问工作台给 BM25 加相关性门槛时踩的两个坑：为什么不能靠提示词让模型自己忽略噪音，以及只看覆盖率为什么会误杀 17.7% 的口语化问题。">
+<meta property="article:published_time" content="2026-11-15T08:00:00.000Z">
+<meta property="article:modified_time" content="2026-11-15T08:00:00.000Z">
+<meta property="article:author" content="ycblue">
+<meta property="article:tag" content="Agent">
+<meta property="article:tag" content="RAG">
+<meta property="article:tag" content="检索评测">
+<meta property="article:tag" content="数问工作台">
+<meta name="twitter:card" content="summary">
+
+
+
+<script type="text/javascript" id="hexo.configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    root: '/',
+    scheme: 'Mist',
+    version: '5.1.4',
+    sidebar: {"position":"left","display":"hide","offset":12,"b2t":false,"scrollpercent":false,"onmobile":false},
+    fancybox: true,
+    tabs: true,
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}},
+    duoshuo: {
+      userId: '0',
+      author: '博主'
+    },
+    algolia: {
+      applicationID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    }
+  };
+</script>
+
+
+
+  <link rel="canonical" href="http://yc-sky.top/2026/11/15/retrieval-gate-coverage-and-idf/"/>
+
+
+
+
+
+  <title>检索别凑够 topK 就往里塞：相关性门槛只看覆盖率，把 17.7% 的真问题也拦了 | Yc的博客</title>
+  
+
+
+
+
+
+
+
+
+<meta name="generator" content="Hexo 4.2.0"></head>
+
+<body itemscope itemtype="http://schema.org/WebPage" lang="zh-Hans">
+
+  
+  
+    
+  
+
+  <div class="container sidebar-position-left page-post-detail">
+    <div class="headband"></div>
+
+    <header id="header" class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-wrapper">
+  <div class="site-meta ">
+    
+
+    <div class="custom-logo-site-title">
+      <a href="/"  class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">Yc的博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+      
+        <p class="site-subtitle"></p>
+      
+  </div>
+
+  <div class="site-nav-toggle">
+    <button>
+      <span class="btn-bar"></span>
+      <span class="btn-bar"></span>
+      <span class="btn-bar"></span>
+    </button>
+  </div>
+</div>
+
+<nav class="site-nav">
+  
+
+  
+    <ul id="menu" class="menu">
+      
+        
+        <li class="menu-item menu-item-home">
+          <a href="/" rel="section">
+            
+              <i class="menu-item-icon fa fa-fw fa-home"></i> <br />
+            
+            首页
+          </a>
+        </li>
+      
+        
+        <li class="menu-item menu-item-agent">
+          <a href="/agent/" rel="section">
+              <i class="menu-item-icon fa fa-fw fa-lightbulb-o"></i> <br />
+            Agent
+          </a>
+        </li>
+        <li class="menu-item menu-item-tags">
+          <a href="/tags/" rel="section">
+            
+              <i class="menu-item-icon fa fa-fw fa-tags"></i> <br />
+            
+            标签
+          </a>
+        </li>
+      
+        
+        <li class="menu-item menu-item-archives">
+          <a href="/archives/" rel="section">
+            
+              <i class="menu-item-icon fa fa-fw fa-archive"></i> <br />
+            
+            归档
+          </a>
+        </li>
+      
+
+      
+        <li class="menu-item menu-item-search">
+          
+            <a href="javascript:;" class="popup-trigger">
+          
+            
+              <i class="menu-item-icon fa fa-search fa-fw"></i> <br />
+            
+            搜索
+          </a>
+        </li>
+      
+    </ul>
+  
+
+  
+    <div class="site-search">
+      
+  <div class="popup search-popup local-search-popup">
+  <div class="local-search-header clearfix">
+    <span class="search-icon">
+      <i class="fa fa-search"></i>
+    </span>
+    <span class="popup-btn-close">
+      <i class="fa fa-times-circle"></i>
+    </span>
+    <div class="local-search-input-wrapper">
+      <input autocomplete="off"
+             placeholder="搜索..." spellcheck="false"
+             type="text" id="local-search-input">
+    </div>
+  </div>
+  <div id="local-search-result"></div>
+</div>
+
+
+
+    </div>
+  
+</nav>
+
+
+
+ </div>
+    </header>
+
+    <main id="main" class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          <div id="content" class="content">
+            
+
+  <div id="posts" class="posts-expand">
+    
+
+  
+
+  
+  
+  
+
+  <article class="post post-type-normal" itemscope itemtype="http://schema.org/Article">
+  
+  
+  
+  <div class="post-block">
+    <link itemprop="mainEntityOfPage" href="http://yc-sky.top/2026/11/15/retrieval-gate-coverage-and-idf/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="name" content="ycblue">
+      <meta itemprop="description" content="">
+      <meta itemprop="image" content="https://cdn.jsdelivr.net/gh/yc2hang/cdn-assets/avatar/avatar.jpg">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="Yc的博客">
+    </span>
+
+    
+      <header class="post-header">
+
+        
+        
+          <h1 class="post-title" itemprop="name headline">检索别凑够 topK 就往里塞：相关性门槛只看覆盖率，把 17.7% 的真问题也拦了</h1>
+        
+      </header>
+    
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+<p>前几天给数问工作台加上传文档问答的时候，撞见一个挺荒诞的现场。我传了一份简历上去，问“其博客链接是什么”，回答里规规矩矩标了角标 <code>[1][2]</code>，点开一看，引用的居然是内置知识库里的两份电力市场规则。</p>
+<a id="more"></a>
+<p>去翻检索日志，链路是这样的：问题改写那一步补了个检索词“个人博客”，分词切出二元组“个人”，去内置的电力规则库里跑 BM25，正好撞上好多条款里都有的套话“任何单位和个人”。虽然分数很低，但检索器当时的逻辑是按分数排序后直接 <code>.slice(0, topK)</code>，6 个证据槽位非塞满不可。简历在浏览器端算出来的切块和这两条电力规则一起进了提示词，模型顺手就都用上了。</p>
+<h2 id="别指望模型自己忽略凑数的片段"><a href="#别指望模型自己忽略凑数的片段" class="headerlink" title="别指望模型自己忽略凑数的片段"></a>别指望模型自己忽略凑数的片段</h2>
+<p>我第一反应是改提示词，加一句“无关的参考资料不要引用，资料不足以回答时直接拒答”。试了几次就会发现，只要无关片段真塞进了上下文，模型很难完全当它不存在。</p>
+<p>今年 8 月有篇论文 <a href="https://arxiv.org/abs/2608.22228" target="_blank" rel="noopener">Prompt-Based Abstention Fails Under Misleading Context</a> 专门测过这件事。作者把同一个问题放在四种上下文里测：证据充足、证据残缺、完全没有上下文、塞入误导片段。结果很直接：当上下文干脆为空的时候，模型很听话，基本都能拒答；一旦上下文里混进了似是而非的片段，哪怕提示词里明确写了拒答要求，模型还是在 41.6% 的题目上硬答了，其中 63% 直接照抄了片段里埋的错误实体。Google 去年那篇 <a href="https://arxiv.org/abs/2411.06037" target="_blank" rel="noopener">Sufficient Context</a> 结论也差不多：Gemini 1.5 Pro、GPT-4o、Claude 3.5 这些大模型在上下文充足时表现很好，但拿到不充分的检索结果时，往往倾向于硬编一个答案而不是拒答。</p>
+<p>两篇论文指向同一个工程结论：模型最擅长在“手里完全没材料”的时候拒答，不擅长在一堆凑数的材料里挑出“这些其实都不挨着”。</p>
+<p>所以在 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/server/knowledge/pipeline.ts#L187" target="_blank" rel="noopener"><code>src/server/knowledge/pipeline.ts</code></a> 里，我把“没证据就拒答”做成了代码短路，根本不调模型：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">// 5. Strict mode with nothing retrieved: refuse without spending a model call.</span><br><span class="line">if (!citations.length &amp;&amp; !webResults.length &amp;&amp; !input.useBaseModel) {</span><br><span class="line">  yield { type: 'text', content: NO_EVIDENCE_ANSWER }</span><br><span class="line">  return</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p>但这段短路能生效的前提是：面对无关问题，检索器得敢返回空数组，或者只返回真正够格的那一两条，别为了凑够 <code>topK</code> 把底下的噪音捞上来。</p>
+<h2 id="第一版门槛只看查询词覆盖率"><a href="#第一版门槛只看查询词覆盖率" class="headerlink" title="第一版门槛：只看查询词覆盖率"></a>第一版门槛：只看查询词覆盖率</h2>
+<p>要让 BM25 敢丢掉弱匹配，直觉上是卡一个分数阈值。但 BM25 的原始分没有固定上限，问题长短不同、词频不同，分数差好几倍，很难定一个通用的死数。</p>
+<p>我第一版换了个归一化的指标：看文档覆盖了问题里多少权重的词。在 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/lib/retrieval/bm25.ts#L75" target="_blank" rel="noopener"><code>src/lib/retrieval/bm25.ts</code></a> 里，扫倒排表的时候顺手算两个数，一个是问题所有不重复词的 IDF 总和 <code>totalIdf</code>，一个是当前文档命中的那些词的 IDF 总和 <code>matchedIdf</code>，相除就是覆盖率 <code>coverage</code>。</p>
+<p>这里有个关键细节：语料库里根本不存在的词（比如电力规则库里的“博客”），也要算进分母 <code>totalIdf</code>。<code>idf(term)</code> 在词频为 0 时返回的是最高权重 <code>Math.log(1 + (N + 0.5) / 0.5)</code>。如果分母只算库里有的词，那问“个人博客”的时候，“博客”被丢掉，分母只剩“个人”，命中“个人”的条款覆盖率就变成 100% 了。把库外词留在分母里，只撞上“个人”一个常见词时，<code>coverage</code> 算出来只有 0.12 左右。</p>
+<p>我当时拍脑袋定了个 <code>minCoverage: 0.2</code>，低于 0.2 的命中直接过滤掉。简历那个复现用例马上修好了。</p>
+<h2 id="跑完-89-道评测题发现误杀了-177"><a href="#跑完-89-道评测题发现误杀了-177" class="headerlink" title="跑完 89 道评测题，发现误杀了 17.7%"></a>跑完 89 道评测题，发现误杀了 17.7%</h2>
+<p>要不是后来补了离线检索评测集（<a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/evals/knowledge/results/baseline-retrieval.md" target="_blank" rel="noopener"><code>evals/knowledge/</code></a>，5 份规则共 89 道题，其中 79 道库内题、10 道库外题），我还以为这事就结了。</p>
+<p>一跑消融实验，数字很难看。不设门槛（<code>no-gate</code>）时，10 道库外题只有 20.0% 能检索为空，另外 80% 都会捞出几条带公共词的规则；加上 <code>coverage &gt;= 0.2</code>（<code>coverage-only</code>）之后，库外题空检索率确实提到了 90.0%，但库内题的 Hit@5 从 91.1% 掉到了 79.7%，更要命的是“库内空检索率”从 0.0% 飙到了 17.7%。也就是说，有将近六分之一的真问题，直接被那几行短路代码当成“未检索到相关条款”给拒答了。</p>
+<p>把被误杀的题捞出来看，几乎全是 <code>paraphrase</code>（口语化提问）这一类。</p>
+<p>原因想通了其实特简单：用户用大白话提问的时候，句子往往比较长，里面带了一堆规则原文里根本不会出现的日常用词。按我刚才的设计，这些库外词每一个都顶着最高档的 IDF 往分母 <code>totalIdf</code> 里加。结果就是，哪怕一条规则实打实命中了问题里的两个核心业务词，只要用户前面铺垫得啰嗦一点，分母一大，<code>matchedIdf / totalIdf</code> 的比例就被稀释到 0.2 以下了。</p>
+<p>覆盖率是个相对值。问题越短，越容易混过去；问题越长、越口语化，门槛反而越苛刻。</p>
+<h2 id="加上绝对-IDF-兜底"><a href="#加上绝对-IDF-兜底" class="headerlink" title="加上绝对 IDF 兜底"></a>加上绝对 IDF 兜底</h2>
+<p>回头看被拦掉的噪音和被误杀的真问题，它们在绝对量上其实分得很开。</p>
+<p>我的默认规则库一共 325 个切块，单个词的最高 IDF 大约是 6.5。那些乱入的噪音，基本都是只撞上了“个人”“电价”“市场”这种在很多条款里都出现过的高频词，单个词的 IDF 普遍在 5.4 以下。而被误杀的口语化真问题，虽然覆盖率不到 0.2，但通常至少命中了两个具体的业务词或二元组，加起来的 <code>matchedIdf</code> 都在 6.3 以上。</p>
+<p>所以我把 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/lib/retrieval/bm25.ts#L28" target="_blank" rel="noopener"><code>src/lib/retrieval/bm25.ts</code></a> 里的门槛改成了“或”的关系：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">export const KEYWORD_RELEVANCE: RelevanceGate = { minCoverage: 0.2, minMatchedIdf: 6 }</span><br></pre></td></tr></table></figure>
+<p>对应的过滤逻辑在 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/lib/retrieval/bm25.ts#L67" target="_blank" rel="noopener"><code>search</code></a> 方法里只有几行：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br></pre></td><td class="code"><pre><span class="line">    let totalIdf = 0</span><br><span class="line">    for (const term of new Set(queryTokens)) {</span><br><span class="line">      const idf = this.idf(term)</span><br><span class="line">      totalIdf += idf</span><br><span class="line">      const list = this.postings.get(term)</span><br><span class="line">      if (!list) continue</span><br><span class="line">      for (const { doc, tf } of list) {</span><br><span class="line">        if (include &amp;&amp; !include(doc)) continue</span><br><span class="line">        const norm = this.k1 * (1 - this.b + this.b * (this.lengths[doc] / (this.averageLength || 1)))</span><br><span class="line">        scores.set(doc, (scores.get(doc) ?? 0) + idf * (tf * (this.k1 + 1)) / (tf + norm))</span><br><span class="line">        matched.set(doc, (matched.get(doc) ?? 0) + idf)</span><br><span class="line">      }</span><br><span class="line">    }</span><br><span class="line">    return [...scores]</span><br><span class="line">      .map(([index, score]) =&gt; {</span><br><span class="line">        const matchedIdf = matched.get(index)!</span><br><span class="line">        return { index, score, coverage: totalIdf ? matchedIdf / totalIdf : 0, matchedIdf }</span><br><span class="line">      })</span><br><span class="line">      .filter(hit =&gt; hit.coverage &gt;= gate.minCoverage || hit.matchedIdf &gt;= gate.minMatchedIdf)</span><br><span class="line">      .sort((a, b) =&gt; b.score - a.score || a.index - b.index)</span><br><span class="line">      .slice(0, limit)</span><br></pre></td></tr></table></figure>
+<p>短问题靠 <code>coverage &gt;= 0.2</code> 放行，长而口语化的问题靠 <code>matchedIdf &gt;= 6</code> 兜底。两边都不沾的——既没占到问题多少比重、命中的又只是单个大路货词——才会被丢掉。</p>
+<p>我在评测集上把两个参数拉了个网格扫了一遍（见 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/evals/knowledge/results/baseline-retrieval.md" target="_blank" rel="noopener"><code>baseline-retrieval.md</code></a>）。定在 <code>0.2 / 6</code> 这一格时，库外空检索率保持在 90.0%，库内空检索率从 17.7% 压回了 6.3%，Hit@5 从 79.7% 回升到 89.9%，平均每次返回 8.5 个切块而不是硬凑满 10 个。</p>
+<h2 id="这个数字身上的两个坑"><a href="#这个数字身上的两个坑" class="headerlink" title="这个数字身上的两个坑"></a>这个数字身上的两个坑</h2>
+<p>虽然线上现在跑的就是这组参数，但它有两个明显的局限，写代码的时候我在注释里标了。</p>
+<p>第一，<code>minMatchedIdf: 6</code> 是跟语料库大小绑死的。BM25 的 IDF 公式是 <code>Math.log(1 + (N - df + 0.5) / (df + 0.5))</code>，分子里直接带着总切块数 <code>N</code>。现在内置库是 325 个切块，最高 IDF 约 6.5，设成 6 刚好意味着“至少得命中两个词，或者一个极其罕见的词”。要是以后往库里塞进几千个切块，<code>N</code> 放大十倍，所有词的 IDF 都会整体往上抬 <code>Math.log(10)</code>（约 2.3），那时候随便撞上一个稍微少见点的单字词就能过 6。这也是为什么用户临时上传的文档不能直接套这组常数，得在浏览器端对着全部上传切块单独算。</p>
+<p>第二，0.2 和 6 是在这 89 道题上看着网格挑出来的。用调参的数据集报出来的 89.9% 和 90.0%，肯定带着乐观偏差。真要验这组门槛稳不稳，还得另外写一批没参与挑数的新题。</p>
+<h2 id="小结"><a href="#小结" class="headerlink" title="小结"></a>小结</h2>
+<p>做 RAG 的时候，“检索不到东西”其实是个好状态，代码直接拦截就能干净利落地拒答；坏状态是检索器为了填满 <code>topK</code> 把一两个词碰巧撞上的噪音塞进上下文，把难题甩给后面的生成模型。在检索出口加一道相关性门槛能挡住大部分噪音，但别只用覆盖率这一个相对指标，长问题会吃亏，配一个绝对的信息量下限（比如命中词的 IDF 总和）才能把口语化的真问题保住。</p>
+<p>参考：</p>
+<ul>
+<li><a href="https://arxiv.org/abs/2608.22228" target="_blank" rel="noopener">Prompt-Based Abstention Fails Under Misleading Context: A Controlled Study of Small Frozen RAG Models（arXiv:2608.22228）</a></li>
+<li><a href="https://arxiv.org/abs/2411.06037" target="_blank" rel="noopener">Sufficient Context: A New Lens on Retrieval Augmented Generation Systems（arXiv:2411.06037）</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat" target="_blank" rel="noopener">数问工作台 deepseek-db-chat</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/lib/retrieval/bm25.ts" target="_blank" rel="noopener">src/lib/retrieval/bm25.ts</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/server/knowledge/pipeline.ts" target="_blank" rel="noopener">src/server/knowledge/pipeline.ts</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/evals/knowledge/results/baseline-retrieval.md" target="_blank" rel="noopener">evals/knowledge/results/baseline-retrieval.md</a></li>
+</ul>
+    </div>
+
+    <footer class="post-footer">
+        <div class="post-tags">
+          <a href="/agent/" rel="tag"># Agent</a>
+          <a href="/agent/" rel="tag"># RAG</a>
+          <a href="/agent/" rel="tag"># 检索评测</a>
+          <a href="/agent/" rel="tag"># 数问工作台</a>
+        </div>
+        <div class="post-nav">
+          <div class="post-nav-next post-nav-item">
+              <a href="/2026/11/13/result-set-compare-relaxed-strict/" rel="next" title="比对 SQL 结果集：strict 44%，relaxed 89%，差的那一半全是模型多给的列">
+                <i class="fa fa-chevron-left"></i> 比对 SQL 结果集：strict 44%，relaxed 89%，差的那一半全是模型多给的列
+              </a>
+          </div>
+          <span class="post-nav-divider"></span>
+          <div class="post-nav-prev post-nav-item">
+              
+          </div>
+        </div>
+    </footer>
+  </div>
+  
+  
+  
+  </article>
+
+
+
+    <div class="post-spread">
+      
+    </div>
+  </div>
+
+
+          </div>
+          
+
+
+          
+
+  
+
+
+
+        </div>
+        
+          
+  
+  <div class="sidebar-toggle">
+    <div class="sidebar-toggle-line-wrap">
+      <span class="sidebar-toggle-line sidebar-toggle-line-first"></span>
+      <span class="sidebar-toggle-line sidebar-toggle-line-middle"></span>
+      <span class="sidebar-toggle-line sidebar-toggle-line-last"></span>
+    </div>
+  </div>
+
+  <aside id="sidebar" class="sidebar">
+    
+    <div class="sidebar-inner">
+
+      
+
+      
+        <ul class="sidebar-nav motion-element">
+          <li class="sidebar-nav-toc sidebar-nav-active" data-target="post-toc-wrap">
+            文章目录
+          </li>
+          <li class="sidebar-nav-overview" data-target="site-overview-wrap">
+            站点概览
+          </li>
+        </ul>
+      
+
+      <section class="site-overview-wrap sidebar-panel">
+        <div class="site-overview">
+          <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+            
+              <img class="site-author-image" itemprop="image"
+                src="https://cdn.jsdelivr.net/gh/yc2hang/cdn-assets/avatar/avatar.jpg"
+                alt="ycblue" />
+            
+              <p class="site-author-name" itemprop="name">ycblue</p>
+              <p class="site-description motion-element" itemprop="description">stay hungry, stay foolish</p>
+          </div>
+
+          <nav class="site-state motion-element">
+
+            
+              <div class="site-state-item site-state-posts">
+              
+                <a href="/archives/%7C%7Carchive">
+              
+                  <span class="site-state-item-count">30</span>
+                  <span class="site-state-item-name">日志</span>
+                </a>
+              </div>
+            
+
+            
+              
+              
+              <div class="site-state-item site-state-categories">
+                <a href="/categories/index.html">
+                  <span class="site-state-item-count">3</span>
+                  <span class="site-state-item-name">分类</span>
+                </a>
+              </div>
+            
+
+            
+              
+              
+              <div class="site-state-item site-state-tags">
+                <a href="/tags/index.html">
+                  <span class="site-state-item-count">14</span>
+                  <span class="site-state-item-name">标签</span>
+                </a>
+              </div>
+            
+
+          </nav>
+
+          
+
+          
+            <div class="links-of-author motion-element">
+                
+                  <span class="links-of-author-item">
+                    <a href="https://github.com/yc2hang" target="_blank" title="GitHub">
+                      
+                        <i class="fa fa-fw fa-github"></i>GitHub</a>
+                  </span>
+                
+                  <span class="links-of-author-item">
+                    <a href="mailto:yc2hangycz@gmail.com" target="_blank" title="E-Mail">
+                      
+                        <i class="fa fa-fw fa-envelope"></i>E-Mail</a>
+                  </span>
+                
+            </div>
+          
+
+          
+          
+
+          
+          
+
+          
+
+        </div>
+      </section>
+
+      
+      <!--noindex-->
+        <section class="post-toc-wrap motion-element sidebar-panel sidebar-panel-active">
+          <div class="post-toc">
+
+            
+              
+            
+
+            
+              <div class="post-toc-content"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#别指望模型自己忽略凑数的片段"><span class="nav-number">1.</span> <span class="nav-text">别指望模型自己忽略凑数的片段</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#第一版门槛只看查询词覆盖率"><span class="nav-number">2.</span> <span class="nav-text">第一版门槛：只看查询词覆盖率</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#跑完-89-道评测题发现误杀了-177"><span class="nav-number">3.</span> <span class="nav-text">跑完 89 道评测题，发现误杀了 17.7%</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#加上绝对-IDF-兜底"><span class="nav-number">4.</span> <span class="nav-text">加上绝对 IDF 兜底</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#这个数字身上的两个坑"><span class="nav-number">5.</span> <span class="nav-text">这个数字身上的两个坑</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#小结"><span class="nav-number">6.</span> <span class="nav-text">小结</span></a></li></ol></div>
+            
+
+          </div>
+        </section>
+      <!--/noindex-->
+      
+
+      
+
+    </div>
+  </aside>
+
+
+        
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="footer-inner">
+        <div class="copyright">&copy; <span itemprop="copyrightYear">2025</span>
+  <span class="with-love">
+    <i class="fa fa-heart"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">ycblue</span>
+
+  
+</div>
+
+
+  <div class="powered-by">由 <a class="theme-link" target="_blank" href="https://hexo.io">Hexo</a> 强力驱动</div>
+
+
+
+  <span class="post-meta-divider">|</span>
+
+
+
+  <div class="theme-info">主题 &mdash; <a class="theme-link" target="_blank" href="https://github.com/iissnan/hexo-theme-next">NexT.Mist</a> v5.1.4</div>
+
+
+
+
+        
+
+
+
+
+
+
+
+        
+      </div>
+    </footer>
+
+    
+      <div class="back-to-top">
+        <i class="fa fa-arrow-up"></i>
+        
+      </div>
+    
+
+    
+
+  </div>
+
+  
+
+<script type="text/javascript">
+  if (Object.prototype.toString.call(window.Promise) !== '[object Function]') {
+    window.Promise = null;
+  }
+</script>
+
+
+
+
+
+
+
+
+
+  
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+  
+  
+    <script type="text/javascript" src="/lib/jquery/index.js?v=2.1.3"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/fastclick/lib/fastclick.min.js?v=1.0.6"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/jquery_lazyload/jquery.lazyload.js?v=1.9.7"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/velocity/velocity.min.js?v=1.2.1"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/velocity/velocity.ui.min.js?v=1.2.1"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/fancybox/source/jquery.fancybox.pack.js?v=2.1.5"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/canvas-nest/canvas-nest.min.js"></script>
+  
+
+
+  
+
+
+  <script type="text/javascript" src="/js/src/utils.js?v=5.1.4"></script>
+
+  <script type="text/javascript" src="/js/src/motion.js?v=5.1.4"></script>
+
+
+
+  
+  
+
+  
+  <script type="text/javascript" src="/js/src/scrollspy.js?v=5.1.4"></script>
+<script type="text/javascript" src="/js/src/post-details.js?v=5.1.4"></script>
+
+
+
+  
+
+
+  <script type="text/javascript" src="/js/src/bootstrap.js?v=5.1.4"></script>
+
+
+
+  
+
+
+  
+
+
+
+
+	
+
+
+
+
+
+  
+
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  <script type="text/javascript">
+    // Popup Window;
+    var isfetched = false;
+    var isXml = true;
+    // Search DB path;
+    var search_path = "search.xml";
+    if (search_path.length === 0) {
+      search_path = "search.xml";
+    } else if (/json$/i.test(search_path)) {
+      isXml = false;
+    }
+    var path = "/" + search_path;
+    // monitor main search box;
+
+    var onPopupClose = function (e) {
+      $('.popup').hide();
+      $('#local-search-input').val('');
+      $('.search-result-list').remove();
+      $('#no-result').remove();
+      $(".local-search-pop-overlay").remove();
+      $('body').css('overflow', '');
+    }
+
+    function proceedsearch() {
+      $("body")
+        .append('<div class="search-popup-overlay local-search-pop-overlay"></div>')
+        .css('overflow', 'hidden');
+      $('.search-popup-overlay').click(onPopupClose);
+      $('.popup').toggle();
+      var $localSearchInput = $('#local-search-input');
+      $localSearchInput.attr("autocapitalize", "none");
+      $localSearchInput.attr("autocorrect", "off");
+      $localSearchInput.focus();
+    }
+
+    // search function;
+    var searchFunc = function(path, search_id, content_id) {
+      'use strict';
+
+      // start loading animation
+      $("body")
+        .append('<div class="search-popup-overlay local-search-pop-overlay">' +
+          '<div id="search-loading-icon">' +
+          '<i class="fa fa-spinner fa-pulse fa-5x fa-fw"></i>' +
+          '</div>' +
+          '</div>')
+        .css('overflow', 'hidden');
+      $("#search-loading-icon").css('margin', '20% auto 0 auto').css('text-align', 'center');
+
+      $.ajax({
+        url: path,
+        dataType: isXml ? "xml" : "json",
+        async: true,
+        success: function(res) {
+          // get the contents from search data
+          isfetched = true;
+          $('.popup').detach().appendTo('.header-inner');
+          var datas = isXml ? $("entry", res).map(function() {
+            return {
+              title: $("title", this).text(),
+              content: $("content",this).text(),
+              url: $("url" , this).text()
+            };
+          }).get() : res;
+          var input = document.getElementById(search_id);
+          var resultContent = document.getElementById(content_id);
+          var inputEventFunction = function() {
+            var searchText = input.value.trim().toLowerCase();
+            var keywords = searchText.split(/[\s\-]+/);
+            if (keywords.length > 1) {
+              keywords.push(searchText);
+            }
+            var resultItems = [];
+            if (searchText.length > 0) {
+              // perform local searching
+              datas.forEach(function(data) {
+                var isMatch = false;
+                var hitCount = 0;
+                var searchTextCount = 0;
+                var title = data.title.trim();
+                var titleInLowerCase = title.toLowerCase();
+                var content = data.content.trim().replace(/<[^>]+>/g,"");
+                var contentInLowerCase = content.toLowerCase();
+                var articleUrl = decodeURIComponent(data.url);
+                var indexOfTitle = [];
+                var indexOfContent = [];
+                // only match articles with not empty titles
+                if(title != '') {
+                  keywords.forEach(function(keyword) {
+                    function getIndexByWord(word, text, caseSensitive) {
+                      var wordLen = word.length;
+                      if (wordLen === 0) {
+                        return [];
+                      }
+                      var startPosition = 0, position = [], index = [];
+                      if (!caseSensitive) {
+                        text = text.toLowerCase();
+                        word = word.toLowerCase();
+                      }
+                      while ((position = text.indexOf(word, startPosition)) > -1) {
+                        index.push({position: position, word: word});
+                        startPosition = position + wordLen;
+                      }
+                      return index;
+                    }
+
+                    indexOfTitle = indexOfTitle.concat(getIndexByWord(keyword, titleInLowerCase, false));
+                    indexOfContent = indexOfContent.concat(getIndexByWord(keyword, contentInLowerCase, false));
+                  });
+                  if (indexOfTitle.length > 0 || indexOfContent.length > 0) {
+                    isMatch = true;
+                    hitCount = indexOfTitle.length + indexOfContent.length;
+                  }
+                }
+
+                // show search results
+
+                if (isMatch) {
+                  // sort index by position of keyword
+
+                  [indexOfTitle, indexOfContent].forEach(function (index) {
+                    index.sort(function (itemLeft, itemRight) {
+                      if (itemRight.position !== itemLeft.position) {
+                        return itemRight.position - itemLeft.position;
+                      } else {
+                        return itemLeft.word.length - itemRight.word.length;
+                      }
+                    });
+                  });
+
+                  // merge hits into slices
+
+                  function mergeIntoSlice(text, start, end, index) {
+                    var item = index[index.length - 1];
+                    var position = item.position;
+                    var word = item.word;
+                    var hits = [];
+                    var searchTextCountInSlice = 0;
+                    while (position + word.length <= end && index.length != 0) {
+                      if (word === searchText) {
+                        searchTextCountInSlice++;
+                      }
+                      hits.push({position: position, length: word.length});
+                      var wordEnd = position + word.length;
+
+                      // move to next position of hit
+
+                      index.pop();
+                      while (index.length != 0) {
+                        item = index[index.length - 1];
+                        position = item.position;
+                        word = item.word;
+                        if (wordEnd > position) {
+                          index.pop();
+                        } else {
+                          break;
+                        }
+                      }
+                    }
+                    searchTextCount += searchTextCountInSlice;
+                    return {
+                      hits: hits,
+                      start: start,
+                      end: end,
+                      searchTextCount: searchTextCountInSlice
+                    };
+                  }
+
+                  var slicesOfTitle = [];
+                  if (indexOfTitle.length != 0) {
+                    slicesOfTitle.push(mergeIntoSlice(title, 0, title.length, indexOfTitle));
+                  }
+
+                  var slicesOfContent = [];
+                  while (indexOfContent.length != 0) {
+                    var item = indexOfContent[indexOfContent.length - 1];
+                    var position = item.position;
+                    var word = item.word;
+                    // cut out 100 characters
+                    var start = position - 20;
+                    var end = position + 80;
+                    if(start < 0){
+                      start = 0;
+                    }
+                    if (end < position + word.length) {
+                      end = position + word.length;
+                    }
+                    if(end > content.length){
+                      end = content.length;
+                    }
+                    slicesOfContent.push(mergeIntoSlice(content, start, end, indexOfContent));
+                  }
+
+                  // sort slices in content by search text's count and hits' count
+
+                  slicesOfContent.sort(function (sliceLeft, sliceRight) {
+                    if (sliceLeft.searchTextCount !== sliceRight.searchTextCount) {
+                      return sliceRight.searchTextCount - sliceLeft.searchTextCount;
+                    } else if (sliceLeft.hits.length !== sliceRight.hits.length) {
+                      return sliceRight.hits.length - sliceLeft.hits.length;
+                    } else {
+                      return sliceLeft.start - sliceRight.start;
+                    }
+                  });
+
+                  // select top N slices in content
+
+                  var upperBound = parseInt('1');
+                  if (upperBound >= 0) {
+                    slicesOfContent = slicesOfContent.slice(0, upperBound);
+                  }
+
+                  // highlight title and content
+
+                  function highlightKeyword(text, slice) {
+                    var result = '';
+                    var prevEnd = slice.start;
+                    slice.hits.forEach(function (hit) {
+                      result += text.substring(prevEnd, hit.position);
+                      var end = hit.position + hit.length;
+                      result += '<b class="search-keyword">' + text.substring(hit.position, end) + '</b>';
+                      prevEnd = end;
+                    });
+                    result += text.substring(prevEnd, slice.end);
+                    return result;
+                  }
+
+                  var resultItem = '';
+
+                  if (slicesOfTitle.length != 0) {
+                    resultItem += "<li><a href='" + articleUrl + "' class='search-result-title'>" + highlightKeyword(title, slicesOfTitle[0]) + "</a>";
+                  } else {
+                    resultItem += "<li><a href='" + articleUrl + "' class='search-result-title'>" + title + "</a>";
+                  }
+
+                  slicesOfContent.forEach(function (slice) {
+                    resultItem += "<a href='" + articleUrl + "'>" +
+                      "<p class=\"search-result\">" + highlightKeyword(content, slice) +
+                      "...</p>" + "</a>";
+                  });
+
+                  resultItem += "</li>";
+                  resultItems.push({
+                    item: resultItem,
+                    searchTextCount: searchTextCount,
+                    hitCount: hitCount,
+                    id: resultItems.length
+                  });
+                }
+              })
+            };
+            if (keywords.length === 1 && keywords[0] === "") {
+              resultContent.innerHTML = '<div id="no-result"><i class="fa fa-search fa-5x" /></div>'
+            } else if (resultItems.length === 0) {
+              resultContent.innerHTML = '<div id="no-result"><i class="fa fa-frown-o fa-5x" /></div>'
+            } else {
+              resultItems.sort(function (resultLeft, resultRight) {
+                if (resultLeft.searchTextCount !== resultRight.searchTextCount) {
+                  return resultRight.searchTextCount - resultLeft.searchTextCount;
+                } else if (resultLeft.hitCount !== resultRight.hitCount) {
+                  return resultRight.hitCount - resultLeft.hitCount;
+                } else {
+                  return resultRight.id - resultLeft.id;
+                }
+              });
+              var searchResultList = '<ul class=\"search-result-list\">';
+              resultItems.forEach(function (result) {
+                searchResultList += result.item;
+              })
+              searchResultList += "</ul>";
+              resultContent.innerHTML = searchResultList;
+            }
+          }
+
+          if ('auto' === 'auto') {
+            input.addEventListener('input', inputEventFunction);
+          } else {
+            $('.search-icon').click(inputEventFunction);
+            input.addEventListener('keypress', function (event) {
+              if (event.keyCode === 13) {
+                inputEventFunction();
+              }
+            });
+          }
+
+          // remove loading animation
+          $(".local-search-pop-overlay").remove();
+          $('body').css('overflow', '');
+
+          proceedsearch();
+        }
+      });
+    }
+
+    // handle and trigger popup window;
+    $('.popup-trigger').click(function(e) {
+      e.stopPropagation();
+      if (isfetched === false) {
+        searchFunc(path, 'local-search-input', 'local-search-result');
+      } else {
+        proceedsearch();
+      };
+    });
+
+    $('.popup-btn-close').click(onPopupClose);
+    $('.popup').click(function(e){
+      e.stopPropagation();
+    });
+    $(document).on('keyup', function (event) {
+      var shouldDismissSearchPopup = event.which === 27 &&
+        $('.search-popup').is(':visible');
+      if (shouldDismissSearchPopup) {
+        onPopupClose();
+      }
+    });
+  </script>
+
+
+
+
+
+  
+
+  
+
+  
+
+  
+  
+
+  
+
+  
+
+  
+
+</body>
+</html>
