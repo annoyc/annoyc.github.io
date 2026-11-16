@@ -1,0 +1,1064 @@
+<!DOCTYPE html>
+
+
+
+  
+
+
+<html class="theme-next mist use-motion" lang="zh-Hans">
+<head>
+  <meta charset="UTF-8"/>
+<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+<meta name="theme-color" content="#222">
+
+
+
+
+
+
+
+
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+  
+  <link href="/lib/fancybox/source/jquery.fancybox.css?v=2.1.5" rel="stylesheet" type="text/css" />
+
+
+
+
+
+
+
+<link href="/lib/font-awesome/css/font-awesome.min.css?v=4.6.2" rel="stylesheet" type="text/css" />
+
+<link href="/css/main.css?v=5.1.4" rel="stylesheet" type="text/css" />
+
+
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png?v=5.1.4">
+
+
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png?v=5.1.4">
+
+
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png?v=5.1.4">
+
+
+  <link rel="mask-icon" href="/images/logo.svg?v=5.1.4" color="#222">
+
+
+
+
+
+  <meta name="keywords" content="Agent,Agent Loop,Human-in-the-Loop,数问工作台," />
+
+
+
+
+
+
+
+
+
+
+<meta name="description" content="数问工作台里执行 SQL 和交互筛选都要等用户点确认。早期做法是在事件流外头窥探结果、强行 break，等用户点完再拼一段文本历史当新对话重跑，前几步查过的表结构全丢了。这篇讲怎么把挂起与恢复做成循环内部的一等状态，以及状态往返客户端时踩的三个坑。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="工具要等用户点确认，别从外面把循环掐断：Agent 的 suspend 与 resume">
+<meta property="og:url" content="http://yc-sky.top/2026/11/16/suspend-and-resume-agent-loop/index.html">
+<meta property="og:site_name" content="Yc的博客">
+<meta property="og:description" content="数问工作台里执行 SQL 和交互筛选都要等用户点确认。早期做法是在事件流外头窥探结果、强行 break，等用户点完再拼一段文本历史当新对话重跑，前几步查过的表结构全丢了。这篇讲怎么把挂起与恢复做成循环内部的一等状态，以及状态往返客户端时踩的三个坑。">
+<meta property="article:published_time" content="2026-11-16T08:00:00.000Z">
+<meta property="article:modified_time" content="2026-11-16T08:00:00.000Z">
+<meta property="article:author" content="ycblue">
+<meta property="article:tag" content="Agent">
+<meta property="article:tag" content="Agent Loop">
+<meta property="article:tag" content="Human-in-the-Loop">
+<meta property="article:tag" content="数问工作台">
+<meta name="twitter:card" content="summary">
+
+
+
+<script type="text/javascript" id="hexo.configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    root: '/',
+    scheme: 'Mist',
+    version: '5.1.4',
+    sidebar: {"position":"left","display":"hide","offset":12,"b2t":false,"scrollpercent":false,"onmobile":false},
+    fancybox: true,
+    tabs: true,
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}},
+    duoshuo: {
+      userId: '0',
+      author: '博主'
+    },
+    algolia: {
+      applicationID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    }
+  };
+</script>
+
+
+
+  <link rel="canonical" href="http://yc-sky.top/2026/11/16/suspend-and-resume-agent-loop/"/>
+
+
+
+
+
+  <title>工具要等用户点确认，别从外面把循环掐断：Agent 的 suspend 与 resume | Yc的博客</title>
+  
+
+
+
+
+
+
+
+
+<meta name="generator" content="Hexo 4.2.0"></head>
+
+<body itemscope itemtype="http://schema.org/WebPage" lang="zh-Hans">
+
+  
+  
+    
+  
+
+  <div class="container sidebar-position-left page-post-detail">
+    <div class="headband"></div>
+
+    <header id="header" class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-wrapper">
+  <div class="site-meta ">
+    
+
+    <div class="custom-logo-site-title">
+      <a href="/"  class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">Yc的博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+      
+        <p class="site-subtitle"></p>
+      
+  </div>
+
+  <div class="site-nav-toggle">
+    <button>
+      <span class="btn-bar"></span>
+      <span class="btn-bar"></span>
+      <span class="btn-bar"></span>
+    </button>
+  </div>
+</div>
+
+<nav class="site-nav">
+  
+
+  
+    <ul id="menu" class="menu">
+      
+        
+        <li class="menu-item menu-item-home">
+          <a href="/" rel="section">
+            
+              <i class="menu-item-icon fa fa-fw fa-home"></i> <br />
+            
+            首页
+          </a>
+        </li>
+      
+        
+        <li class="menu-item menu-item-agent">
+          <a href="/agent/" rel="section">
+              <i class="menu-item-icon fa fa-fw fa-lightbulb-o"></i> <br />
+            Agent
+          </a>
+        </li>
+        <li class="menu-item menu-item-tags">
+          <a href="/tags/" rel="section">
+            
+              <i class="menu-item-icon fa fa-fw fa-tags"></i> <br />
+            
+            标签
+          </a>
+        </li>
+      
+        
+        <li class="menu-item menu-item-archives">
+          <a href="/archives/" rel="section">
+            
+              <i class="menu-item-icon fa fa-fw fa-archive"></i> <br />
+            
+            归档
+          </a>
+        </li>
+      
+
+      
+        <li class="menu-item menu-item-search">
+          
+            <a href="javascript:;" class="popup-trigger">
+          
+            
+              <i class="menu-item-icon fa fa-search fa-fw"></i> <br />
+            
+            搜索
+          </a>
+        </li>
+      
+    </ul>
+  
+
+  
+    <div class="site-search">
+      
+  <div class="popup search-popup local-search-popup">
+  <div class="local-search-header clearfix">
+    <span class="search-icon">
+      <i class="fa fa-search"></i>
+    </span>
+    <span class="popup-btn-close">
+      <i class="fa fa-times-circle"></i>
+    </span>
+    <div class="local-search-input-wrapper">
+      <input autocomplete="off"
+             placeholder="搜索..." spellcheck="false"
+             type="text" id="local-search-input">
+    </div>
+  </div>
+  <div id="local-search-result"></div>
+</div>
+
+
+
+    </div>
+  
+</nav>
+
+
+
+ </div>
+    </header>
+
+    <main id="main" class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          <div id="content" class="content">
+            
+
+  <div id="posts" class="posts-expand">
+    
+
+  
+
+  
+  
+  
+
+  <article class="post post-type-normal" itemscope itemtype="http://schema.org/Article">
+  
+  
+  
+  <div class="post-block">
+    <link itemprop="mainEntityOfPage" href="http://yc-sky.top/2026/11/16/suspend-and-resume-agent-loop/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="name" content="ycblue">
+      <meta itemprop="description" content="">
+      <meta itemprop="image" content="https://cdn.jsdelivr.net/gh/yc2hang/cdn-assets/avatar/avatar.jpg">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="Yc的博客">
+    </span>
+
+    
+      <header class="post-header">
+
+        
+        
+          <h1 class="post-title" itemprop="name headline">工具要等用户点确认，别从外面把循环掐断：Agent 的 suspend 与 resume</h1>
+        
+      </header>
+    
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+<p>数问工作台里有两个工具不能当场跑完：一个是 <code>execute_sql</code>，生成出 SQL 后得停下来等用户在界面上点“确认执行”；另一个是 <code>smart_filter</code>，遇到“最近”“按状态”这种模糊说法时，得先弹出筛选卡片等用户选完再继续。</p>
+<a id="more"></a>
+<p>写第一版的时候，我的 Agent 循环只是一个顺着往下跑的 <code>while (step &lt; maxSteps)</code>，根本没有“暂停”的概念。为了把循环停住，当时的做法挺别扭：<code>execute_sql</code> 先返回一段带 <code>pending_confirmation</code> 的 JSON 字符串，顺手塞进请求外头的一个 <code>Map</code>；SSE 路由每收到下一个 <code>step</code> 事件，就去那个 <code>Map</code> 里偷看一眼，发现有待确认的 SQL，就往前端发一条确认消息，然后直接 <code>break</code> 跳出 <code>for await</code> 循环。</p>
+<p>停是停住了，接不回去。用户点完“确认”、真正跑出查询结果之后，前端只能再发一次普通请求，把界面上看得到的几句文字问答和刚跑出来的表格拼成一条新的 <code>user</code> 消息，起一个全新的 Agent 实例。</p>
+<p>这带来了两个明显的毛病。第一，模型在调 <code>execute_sql</code> 之前往往已经调过 <code>list_tables</code>、<code>get_table_schema</code> 摸清了表结构，但这些中间的工具调用不在前端可见的文字列表里。强行 <code>break</code> 再重开一轮，前几步查出来的表结构全丢了，要是 SQL 报错需要改写，模型还得从头再查一遍表。第二，在外层靠工具名字配对结果队列，一旦模型在同一轮里并发调了两次同名工具，顺序很容易乱。</p>
+<p>前几天我把那套外层 <code>break</code> 拆了，在循环里加了正式的 <code>suspend</code> 和 <code>resume</code>。</p>
+<h2 id="先看重型框架怎么做再定自己的边界"><a href="#先看重型框架怎么做再定自己的边界" class="headerlink" title="先看重型框架怎么做，再定自己的边界"></a>先看重型框架怎么做，再定自己的边界</h2>
+<p>动手之前我去翻了 LangGraph 的 <a href="https://docs.langchain.com/oss/javascript/langgraph/interrupts" target="_blank" rel="noopener">Interrupts 文档</a>。它的思路很像前端熟悉的代数效应或者协程：工具或节点内部直接调 <code>interrupt(payload)</code>，框架底层抛一个特殊异常把图停住，用 <code>checkpointer</code> 把当前状态按 <code>thread_id</code> 存进内存或数据库；等拿到用户输入，再调 <code>graph.invoke(new Command({ resume }), config)</code>。恢复的时候，被中断的那个节点会从函数第一行重新往下跑，直到撞上 <code>interrupt()</code> 时直接拿到外部传入的值。</p>
+<p>这套机制有个隐含前提：服务端得配一个持久化的 <code>checkpointer</code>，而且因为节点会重头重跑，<code>interrupt()</code> 之前的代码不能有不可重入的副作用，文档里还专门警告不能在同一个节点里写 <code>while</code> 循环调多次 <code>interrupt()</code>。</p>
+<p>我的场景比通用图编排简单得多。在标准的 OpenAI / DeepSeek 工具调用协议里，天然的暂停边界本来就存在：模型发出一条带 <code>tool_calls</code> 的 <code>assistant</code> 消息，正在等对应的 <code>role: 'tool'</code> 消息填回来。工具本身不需要执行到一半挂起再重跑，只要告诉循环“这次调用还没有真结果，先停在这，等外部把 <code>tool_call_id</code> 对应的结果补上再调下一次模型”就够了。</p>
+<p>而且我不打算为了等用户点个按钮就在服务端引一套 Redis 或数据库存会话快照。数问工作台的连接配置和会话本来就在浏览器端管，挂起的状态只要能安全地序列化成 JSON，完全可以先交还给前端拿着，点完确认再原样带回来。</p>
+<h2 id="最小实现一个-Symbol-加三段状态流转"><a href="#最小实现一个-Symbol-加三段状态流转" class="headerlink" title="最小实现：一个 Symbol 加三段状态流转"></a>最小实现：一个 Symbol 加三段状态流转</h2>
+<p>整个机制拆开只有三小块。</p>
+<p>第一块在 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/tool/index.ts#L49-L55" target="_blank" rel="noopener"><code>src/core/tool/index.ts</code></a>，给工具提供一个 <code>suspend</code> 辅助函数，返回带特定 <code>Symbol</code> 的对象：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br></pre></td><td class="code"><pre><span class="line">const SUSPEND = Symbol.for('agent-loop.tool.suspend')</span><br><span class="line"></span><br><span class="line">export function suspend(payload: unknown, message = 'Not executed: waiting for user input.'): ToolSuspension {</span><br><span class="line">  return { [SUSPEND]: true, payload, message }</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p><code>execute_sql</code> 通过安全检查后不再自己拼状态字符串，直接 <code>return suspend(resultPayload, '该 SQL 未执行：尚未获得用户确认。如仍需要，请重新提交。')</code>（见 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/server/tools.ts#L269" target="_blank" rel="noopener"><code>src/server/tools.ts</code></a>）。</p>
+<p>第二块在 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/generate/generate-loop.ts#L214-L250" target="_blank" rel="noopener"><code>src/core/generate/generate-loop.ts</code></a>。一轮工具并发执行完，循环按调用顺序把每条结果收进 <code>currentMessages</code>，同时记下哪些调用返回了 <code>suspension</code>。只要 <code>pending</code> 数组不为空，发完 <code>suspend</code> 事件就直接 <code>return</code>，不再进入下一轮模型请求：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br></pre></td><td class="code"><pre><span class="line">const toolResults = await executeToolCalls(stepResult.toolCalls, currentTools, signal, runner, hooks, currentModel, truncatedCallId)</span><br><span class="line">const pending: PendingToolCall[] = []</span><br><span class="line">for (const { toolCall, outcome } of toolResults) {</span><br><span class="line">  const name = toolCall.function?.name ?? ''</span><br><span class="line">  currentMessages.push({ role: 'tool', content: outcome.content, tool_call_id: toolCall.id })</span><br><span class="line">  yield {</span><br><span class="line">    type: 'tool-result',</span><br><span class="line">    step: stepRef.value,</span><br><span class="line">    toolCallId: toolCall.id,</span><br><span class="line">    name,</span><br><span class="line">    content: outcome.content,</span><br><span class="line">    ...(outcome.suspension ? { suspended: true, payload: outcome.suspension.payload } : {}),</span><br><span class="line">  }</span><br><span class="line">  if (outcome.suspension) {</span><br><span class="line">    pending.push({ toolCallId: toolCall.id, name, arguments: toolCall.function?.arguments ?? '', payload: outcome.suspension.payload })</span><br><span class="line">  }</span><br><span class="line">}</span><br><span class="line">// ...</span><br><span class="line">if (pending.length &gt; 0) {</span><br><span class="line">  const suspended = { messages: conversationOf(currentMessages), pending }</span><br><span class="line">  yield { type: 'suspend', step: stepRef.value, state: suspended }</span><br><span class="line">  return { text: lastAssistantMsg(currentMessages), output: undefined, usage: totalUsage, suspended }</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p>第三块是恢复。用户确认后，前端把刚才收到的 <code>state</code>、<code>toolCallId</code> 和真实的 SQL 执行结果传回给服务端，循环入口用 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/generate/suspend.ts#L62-L76" target="_blank" rel="noopener"><code>src/core/generate/suspend.ts</code></a> 里的 <code>applyResume</code> 把真实结果填回对应的 <code>tool_call_id</code> 位置：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line">export function applyResume(resume: ResumeParams): ChatMessage[] {</span><br><span class="line">  const pendingIds = new Set(resume.state.pending.map(call =&gt; call.toolCallId))</span><br><span class="line">  const results = new Map&lt;string, string&gt;()</span><br><span class="line">  for (const { toolCallId, content } of resume.results) {</span><br><span class="line">    if (!pendingIds.has(toolCallId)) {</span><br><span class="line">      throw new Error(`Cannot resume: &quot;${toolCallId}&quot; is not a pending tool call`)</span><br><span class="line">    }</span><br><span class="line">    results.set(toolCallId, content)</span><br><span class="line">  }</span><br><span class="line">  return resume.state.messages.map((message) =&gt; {</span><br><span class="line">    if (message.role === 'tool' &amp;&amp; results.has(message.tool_call_id)) {</span><br><span class="line">      return { ...message, content: results.get(message.tool_call_id)! }</span><br><span class="line">    }</span><br><span class="line">    return { ...message }</span><br><span class="line">  })</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p>这样一来，之前同一次运行里查过的表结构、做过的查询规划都在 <code>state.messages</code> 里原封不动地留着，模型拿到的就是一条正常的 <code>tool</code> 响应。</p>
+<h2 id="踩过的三个坑"><a href="#踩过的三个坑" class="headerlink" title="踩过的三个坑"></a>踩过的三个坑</h2>
+<p>主干代码加起来不到一百行，但写单测和联调的时候连着踩了三个细节问题。</p>
+<h3 id="1-挂起的那一刻就要先把占位-tool-消息写进去"><a href="#1-挂起的那一刻就要先把占位-tool-消息写进去" class="headerlink" title="1. 挂起的那一刻，就要先把占位 tool 消息写进去"></a>1. 挂起的那一刻，就要先把占位 <code>tool</code> 消息写进去</h3>
+<p>看上面的 <code>applyResume</code> 会发现，它做的事情不是往消息数组末尾 <code>push</code> 一条新的 <code>tool</code> 消息，而是去 <code>map</code> 替换一条已经存在的 <code>tool</code> 消息。</p>
+<p>我一开始写的是挂起时不写 <code>tool</code> 消息，等恢复时再 <code>push</code>。马上就想到一个反例：模型完全可能在同一个 step 里同时发出两个工具调用（比如一边调 <code>smart_filter</code> 一边调 <code>execute_sql</code>，或者连续提两条待确认调用），而前端界面一次只展示一张确认卡片，恢复时只带回其中一个 <code>toolCallId</code> 的结果。</p>
+<p>Chat Completions 协议有一个死规矩：只要前一条 <code>assistant</code> 消息的 <code>tool_calls</code> 数组里有 N 个调用，后面就必须紧跟 N 条对应的 <code>role: 'tool'</code> 消息，少一条接口直接报 400。</p>
+<p>所以在 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/tool/index.ts#L103-L105" target="_blank" rel="noopener"><code>src/core/tool/index.ts</code></a> 检测到 <code>isSuspension(execResult)</code> 时，当场就会用 <code>suspend()</code> 传入的第二参数生成一条形如 <code>{"success":false,"error":"该 SQL 未执行：尚未获得用户确认..."}</code> 的占位内容，先塞进 <code>currentMessages</code>。恢复的时候，用户确认过的那条被真结果覆盖；没被覆盖到的另一条，留在原地的就是一句合法的“尚未执行”说明，既不会把协议搞崩，模型读到也明白发生了什么。</p>
+<h3 id="2-状态从客户端回来不能信也不能带-system"><a href="#2-状态从客户端回来不能信也不能带-system" class="headerlink" title="2. 状态从客户端回来，不能信，也不能带 system"></a>2. 状态从客户端回来，不能信，也不能带 <code>system</code></h3>
+<p>把 <code>state</code> 交给浏览器保存，省掉了服务端存储，代价是 <code>state</code> 跨了信任边界——浏览器传回来的任何 JSON 都得当成不可信输入。</p>
+<p>如果挂起时把整条 <code>currentMessages</code> 原样发给前端，里面第一条就是完整的 <code>system</code> prompt（包含数据库概览、安全规则）和 few-shot 示例。这有两个问题：一是白白把大段系统提示词在网络上来回传；二是客户端一旦篡改了 <code>state.messages[0]</code>，就能直接替换掉服务端的 <code>system</code> 指令。</p>
+<p>所以在 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/generate/suspend.ts#L11-L59" target="_blank" rel="noopener"><code>src/core/generate/suspend.ts</code></a> 里做了两道隔离。</p>
+<p>挂起导出时，<code>conversationOf(currentMessages)</code> 会把排在最前面的 <code>system</code> 消息和 <code>name === 'few-shot'</code> 的示例全部剥掉，只留真正的对话轮次。恢复解析时，<code>parseSuspendedState</code> 里的 Zod schema 用 <code>discriminatedUnion</code> 严格限制 <code>role</code> 只能是 <code>'user' | 'assistant' | 'tool'</code>：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line">// A stored state never carries configuration: system and few-shot messages are rejected.</span><br><span class="line">const messageSchema = z.discriminatedUnion('role', [</span><br><span class="line">  z.object({ role: z.literal('user'), content: z.string(), name: z.string().optional() }),</span><br><span class="line">  z.object({</span><br><span class="line">    role: z.literal('assistant'),</span><br><span class="line">    content: z.string().nullable().optional(),</span><br><span class="line">    reasoning_content: z.string().optional(),</span><br><span class="line">    tool_calls: z.array(toolCallSchema).optional(),</span><br><span class="line">  }),</span><br><span class="line">  z.object({ role: z.literal('tool'), content: z.string(), tool_call_id: z.string().min(1) }),</span><br><span class="line">])</span><br></pre></td></tr></table></figure>
+<p>谁往 <code>messages</code> 里塞一条 <code>role: 'system'</code>，校验直接抛错。等校验通过了，服务端再用当前最新的配置重新拼上 <code>system</code> 和 <code>fewShot</code>（见 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/generate/generate-loop.ts#L84" target="_blank" rel="noopener"><code>generate-loop.ts</code></a>）。用户在等待确认的空当里哪怕改了模型设置或权限档位，恢复后生效的也是新配置。</p>
+<p>除此之外，<code>parseSuspendedState</code> 还会交叉检查 <code>pending</code> 里的每一个 <code>toolCallId</code>，必须同时在某条 <code>assistant.tool_calls</code> 和某条 <code>tool.tool_call_id</code> 里出现过。万一前端传上来的状态坏了或者对不上号，<a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/server/chat-events.ts#L15-L24" target="_blank" rel="noopener"><code>src/server/chat-events.ts</code></a> 里的 <code>parseResume</code> 会捕获异常返回 <code>undefined</code>，外层自动退回用可见历史重开一轮的兜底路径，不会直接把对话卡死。</p>
+<h3 id="3-流式路径漏存了-reasoning_content恢复后撞上-DeepSeek-的-400"><a href="#3-流式路径漏存了-reasoning_content恢复后撞上-DeepSeek-的-400" class="headerlink" title="3. 流式路径漏存了 reasoning_content，恢复后撞上 DeepSeek 的 400"></a>3. 流式路径漏存了 <code>reasoning_content</code>，恢复后撞上 DeepSeek 的 400</h3>
+<p>以前每次确认都是新起一轮对话，历史里只有纯文本的 <code>user</code> 和 <code>assistant</code>，从来没把带 <code>tool_calls</code> 的 <code>assistant</code> 消息跨请求回传过。改成真正的恢复之后，前一步的 <code>assistant</code> 消息要原样带进下一步请求，马上暴露出流式路径的一个老 bug。</p>
+<p>按 DeepSeek 官方的 <a href="https://api-docs.deepseek.com/guides/thinking_mode" target="_blank" rel="noopener">Thinking Mode 文档</a>，普通多轮对话不需要回传上一轮的思维链 <code>reasoning_content</code>；但只要请求里带了 <code>tools</code> 参数，此前步骤生成的 <code>reasoning_content</code> 就必须原封不动地传回给 API，让模型接着上一步的推理往下走，漏传会直接返回 400 错误。</p>
+<p>我翻了代码才发现，非流式调用因为直接拿了响应里的 <code>message</code> 对象，天然留着 <code>reasoning_content</code>；而流式路径 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/generate/generate-stream.ts#L85-L92" target="_blank" rel="noopener"><code>src/core/generate/generate-stream.ts</code></a> 一边收到 <code>delta.reasoning_content</code> 一边往前端推了 <code>reasoning-delta</code> 事件，最后拼 <code>assistantMessage</code> 时居然只存了 <code>content</code> 和 <code>tool_calls</code>，把攒下来的思维链直接丢了。</p>
+<p>修这个坑得两头兼顾：一方面在 <code>generate-stream.ts</code> 和挂起状态的 <code>messageSchema</code> 里都把 <code>reasoning_content</code> 留住；另一方面，数问工作台还支持切到其他 OpenAI 兼容服务，那些服务并不认识输入消息里的 <code>reasoning_content</code> 字段，严一点的网关还会报错。所以在 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/model/invoke.ts#L19-L35" target="_blank" rel="noopener"><code>src/core/model/invoke.ts</code></a> 发请求前加了一道 <code>prepareMessages</code>：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">export function prepareMessages(messages: ChatMessage[], replayReasoning: boolean): ChatMessage[] {</span><br><span class="line">  if (replayReasoning) return messages</span><br><span class="line">  return messages.map((message) =&gt; {</span><br><span class="line">    if (message.role !== 'assistant' || !('reasoning_content' in message || 'reasoning' in message)) return message</span><br><span class="line">    const { reasoning_content: _content, reasoning: _alias, ...rest } = message as AssistantMessage &amp; { reasoning?: unknown }</span><br><span class="line">    return rest</span><br><span class="line">  })</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p>内存和挂起快照里永远保留完整的 <code>reasoning_content</code>，真正发 HTTP 请求的那一刻，只有 <code>thinkingStyle === 'deepseek'</code> 且思考模式未关闭时才带出去，其他服务商一律剥掉。</p>
+<h2 id="小结"><a href="#小结" class="headerlink" title="小结"></a>小结</h2>
+<p>做人工确认的时候，如果只是从循环外面强行 <code>break</code>，表面上看流是停住了，实际上是把一次完整的工具调用硬生生劈成了两轮不相干的对话。把暂停点放在“工具已经返回占位消息、但还没发起下一次模型调用”的缝隙里，让工具自己返回 <code>suspend()</code>，状态就能干干净净地封进快照。剩下的工作，就是防住这个快照在客户端走一遭回来可能带来的越权和协议不一致。</p>
+<p>参考：</p>
+<ul>
+<li><a href="https://docs.langchain.com/oss/javascript/langgraph/interrupts" target="_blank" rel="noopener">Interrupts - Docs by LangChain（LangGraph JavaScript 文档）</a></li>
+<li><a href="https://api-docs.deepseek.com/guides/thinking_mode" target="_blank" rel="noopener">Thinking Mode - DeepSeek API Docs</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat" target="_blank" rel="noopener">数问工作台 deepseek-db-chat</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/generate/suspend.ts" target="_blank" rel="noopener">src/core/generate/suspend.ts</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/generate/generate-loop.ts" target="_blank" rel="noopener">src/core/generate/generate-loop.ts</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/tool/index.ts" target="_blank" rel="noopener">src/core/tool/index.ts</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/model/invoke.ts" target="_blank" rel="noopener">src/core/model/invoke.ts</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/server/chat-events.ts" target="_blank" rel="noopener">src/server/chat-events.ts</a></li>
+</ul>
+    </div>
+
+    <footer class="post-footer">
+        <div class="post-tags">
+          <a href="/agent/" rel="tag"># Agent</a>
+          <a href="/agent/" rel="tag"># Agent Loop</a>
+          <a href="/agent/" rel="tag"># Human-in-the-Loop</a>
+          <a href="/agent/" rel="tag"># 数问工作台</a>
+        </div>
+        <div class="post-nav">
+          <div class="post-nav-next post-nav-item">
+              <a href="/2026/11/15/retrieval-gate-coverage-and-idf/" rel="next" title="检索别凑够 topK 就往里塞：相关性门槛只看覆盖率，把 17.7% 的真问题也拦了">
+                <i class="fa fa-chevron-left"></i> 检索别凑够 topK 就往里塞：相关性门槛只看覆盖率，把 17.7% 的真问题也拦了
+              </a>
+          </div>
+          <span class="post-nav-divider"></span>
+          <div class="post-nav-prev post-nav-item">
+              
+          </div>
+        </div>
+    </footer>
+  </div>
+  
+  
+  
+  </article>
+
+
+
+    <div class="post-spread">
+      
+    </div>
+  </div>
+
+
+          </div>
+          
+
+
+          
+
+  
+
+
+
+        </div>
+        
+          
+  
+  <div class="sidebar-toggle">
+    <div class="sidebar-toggle-line-wrap">
+      <span class="sidebar-toggle-line sidebar-toggle-line-first"></span>
+      <span class="sidebar-toggle-line sidebar-toggle-line-middle"></span>
+      <span class="sidebar-toggle-line sidebar-toggle-line-last"></span>
+    </div>
+  </div>
+
+  <aside id="sidebar" class="sidebar">
+    
+    <div class="sidebar-inner">
+
+      
+
+      
+        <ul class="sidebar-nav motion-element">
+          <li class="sidebar-nav-toc sidebar-nav-active" data-target="post-toc-wrap">
+            文章目录
+          </li>
+          <li class="sidebar-nav-overview" data-target="site-overview-wrap">
+            站点概览
+          </li>
+        </ul>
+      
+
+      <section class="site-overview-wrap sidebar-panel">
+        <div class="site-overview">
+          <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+            
+              <img class="site-author-image" itemprop="image"
+                src="https://cdn.jsdelivr.net/gh/yc2hang/cdn-assets/avatar/avatar.jpg"
+                alt="ycblue" />
+            
+              <p class="site-author-name" itemprop="name">ycblue</p>
+              <p class="site-description motion-element" itemprop="description">stay hungry, stay foolish</p>
+          </div>
+
+          <nav class="site-state motion-element">
+
+            
+              <div class="site-state-item site-state-posts">
+              
+                <a href="/archives/%7C%7Carchive">
+              
+                  <span class="site-state-item-count">30</span>
+                  <span class="site-state-item-name">日志</span>
+                </a>
+              </div>
+            
+
+            
+              
+              
+              <div class="site-state-item site-state-categories">
+                <a href="/categories/index.html">
+                  <span class="site-state-item-count">3</span>
+                  <span class="site-state-item-name">分类</span>
+                </a>
+              </div>
+            
+
+            
+              
+              
+              <div class="site-state-item site-state-tags">
+                <a href="/tags/index.html">
+                  <span class="site-state-item-count">14</span>
+                  <span class="site-state-item-name">标签</span>
+                </a>
+              </div>
+            
+
+          </nav>
+
+          
+
+          
+            <div class="links-of-author motion-element">
+                
+                  <span class="links-of-author-item">
+                    <a href="https://github.com/yc2hang" target="_blank" title="GitHub">
+                      
+                        <i class="fa fa-fw fa-github"></i>GitHub</a>
+                  </span>
+                
+                  <span class="links-of-author-item">
+                    <a href="mailto:yc2hangycz@gmail.com" target="_blank" title="E-Mail">
+                      
+                        <i class="fa fa-fw fa-envelope"></i>E-Mail</a>
+                  </span>
+                
+            </div>
+          
+
+          
+          
+
+          
+          
+
+          
+
+        </div>
+      </section>
+
+      
+      <!--noindex-->
+        <section class="post-toc-wrap motion-element sidebar-panel sidebar-panel-active">
+          <div class="post-toc">
+
+            
+              
+            
+
+            
+              <div class="post-toc-content"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#先看重型框架怎么做再定自己的边界"><span class="nav-number">1.</span> <span class="nav-text">先看重型框架怎么做，再定自己的边界</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#最小实现一个-Symbol-加三段状态流转"><span class="nav-number">2.</span> <span class="nav-text">最小实现：一个 Symbol 加三段状态流转</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#踩过的三个坑"><span class="nav-number">3.</span> <span class="nav-text">踩过的三个坑</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#1-挂起的那一刻就要先把占位-tool-消息写进去"><span class="nav-number">3.1.</span> <span class="nav-text">1. 挂起的那一刻，就要先把占位 tool 消息写进去</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#2-状态从客户端回来不能信也不能带-system"><span class="nav-number">3.2.</span> <span class="nav-text">2. 状态从客户端回来，不能信，也不能带 system</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#3-流式路径漏存了-reasoning_content恢复后撞上-DeepSeek-的-400"><span class="nav-number">3.3.</span> <span class="nav-text">3. 流式路径漏存了 reasoning_content，恢复后撞上 DeepSeek 的 400</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#小结"><span class="nav-number">4.</span> <span class="nav-text">小结</span></a></li></ol></div>
+            
+
+          </div>
+        </section>
+      <!--/noindex-->
+      
+
+      
+
+    </div>
+  </aside>
+
+
+        
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="footer-inner">
+        <div class="copyright">&copy; <span itemprop="copyrightYear">2025</span>
+  <span class="with-love">
+    <i class="fa fa-heart"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">ycblue</span>
+
+  
+</div>
+
+
+  <div class="powered-by">由 <a class="theme-link" target="_blank" href="https://hexo.io">Hexo</a> 强力驱动</div>
+
+
+
+  <span class="post-meta-divider">|</span>
+
+
+
+  <div class="theme-info">主题 &mdash; <a class="theme-link" target="_blank" href="https://github.com/iissnan/hexo-theme-next">NexT.Mist</a> v5.1.4</div>
+
+
+
+
+        
+
+
+
+
+
+
+
+        
+      </div>
+    </footer>
+
+    
+      <div class="back-to-top">
+        <i class="fa fa-arrow-up"></i>
+        
+      </div>
+    
+
+    
+
+  </div>
+
+  
+
+<script type="text/javascript">
+  if (Object.prototype.toString.call(window.Promise) !== '[object Function]') {
+    window.Promise = null;
+  }
+</script>
+
+
+
+
+
+
+
+
+
+  
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+  
+  
+    <script type="text/javascript" src="/lib/jquery/index.js?v=2.1.3"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/fastclick/lib/fastclick.min.js?v=1.0.6"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/jquery_lazyload/jquery.lazyload.js?v=1.9.7"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/velocity/velocity.min.js?v=1.2.1"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/velocity/velocity.ui.min.js?v=1.2.1"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/fancybox/source/jquery.fancybox.pack.js?v=2.1.5"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/canvas-nest/canvas-nest.min.js"></script>
+  
+
+
+  
+
+
+  <script type="text/javascript" src="/js/src/utils.js?v=5.1.4"></script>
+
+  <script type="text/javascript" src="/js/src/motion.js?v=5.1.4"></script>
+
+
+
+  
+  
+
+  
+  <script type="text/javascript" src="/js/src/scrollspy.js?v=5.1.4"></script>
+<script type="text/javascript" src="/js/src/post-details.js?v=5.1.4"></script>
+
+
+
+  
+
+
+  <script type="text/javascript" src="/js/src/bootstrap.js?v=5.1.4"></script>
+
+
+
+  
+
+
+  
+
+
+
+
+	
+
+
+
+
+
+  
+
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  <script type="text/javascript">
+    // Popup Window;
+    var isfetched = false;
+    var isXml = true;
+    // Search DB path;
+    var search_path = "search.xml";
+    if (search_path.length === 0) {
+      search_path = "search.xml";
+    } else if (/json$/i.test(search_path)) {
+      isXml = false;
+    }
+    var path = "/" + search_path;
+    // monitor main search box;
+
+    var onPopupClose = function (e) {
+      $('.popup').hide();
+      $('#local-search-input').val('');
+      $('.search-result-list').remove();
+      $('#no-result').remove();
+      $(".local-search-pop-overlay").remove();
+      $('body').css('overflow', '');
+    }
+
+    function proceedsearch() {
+      $("body")
+        .append('<div class="search-popup-overlay local-search-pop-overlay"></div>')
+        .css('overflow', 'hidden');
+      $('.search-popup-overlay').click(onPopupClose);
+      $('.popup').toggle();
+      var $localSearchInput = $('#local-search-input');
+      $localSearchInput.attr("autocapitalize", "none");
+      $localSearchInput.attr("autocorrect", "off");
+      $localSearchInput.focus();
+    }
+
+    // search function;
+    var searchFunc = function(path, search_id, content_id) {
+      'use strict';
+
+      // start loading animation
+      $("body")
+        .append('<div class="search-popup-overlay local-search-pop-overlay">' +
+          '<div id="search-loading-icon">' +
+          '<i class="fa fa-spinner fa-pulse fa-5x fa-fw"></i>' +
+          '</div>' +
+          '</div>')
+        .css('overflow', 'hidden');
+      $("#search-loading-icon").css('margin', '20% auto 0 auto').css('text-align', 'center');
+
+      $.ajax({
+        url: path,
+        dataType: isXml ? "xml" : "json",
+        async: true,
+        success: function(res) {
+          // get the contents from search data
+          isfetched = true;
+          $('.popup').detach().appendTo('.header-inner');
+          var datas = isXml ? $("entry", res).map(function() {
+            return {
+              title: $("title", this).text(),
+              content: $("content",this).text(),
+              url: $("url" , this).text()
+            };
+          }).get() : res;
+          var input = document.getElementById(search_id);
+          var resultContent = document.getElementById(content_id);
+          var inputEventFunction = function() {
+            var searchText = input.value.trim().toLowerCase();
+            var keywords = searchText.split(/[\s\-]+/);
+            if (keywords.length > 1) {
+              keywords.push(searchText);
+            }
+            var resultItems = [];
+            if (searchText.length > 0) {
+              // perform local searching
+              datas.forEach(function(data) {
+                var isMatch = false;
+                var hitCount = 0;
+                var searchTextCount = 0;
+                var title = data.title.trim();
+                var titleInLowerCase = title.toLowerCase();
+                var content = data.content.trim().replace(/<[^>]+>/g,"");
+                var contentInLowerCase = content.toLowerCase();
+                var articleUrl = decodeURIComponent(data.url);
+                var indexOfTitle = [];
+                var indexOfContent = [];
+                // only match articles with not empty titles
+                if(title != '') {
+                  keywords.forEach(function(keyword) {
+                    function getIndexByWord(word, text, caseSensitive) {
+                      var wordLen = word.length;
+                      if (wordLen === 0) {
+                        return [];
+                      }
+                      var startPosition = 0, position = [], index = [];
+                      if (!caseSensitive) {
+                        text = text.toLowerCase();
+                        word = word.toLowerCase();
+                      }
+                      while ((position = text.indexOf(word, startPosition)) > -1) {
+                        index.push({position: position, word: word});
+                        startPosition = position + wordLen;
+                      }
+                      return index;
+                    }
+
+                    indexOfTitle = indexOfTitle.concat(getIndexByWord(keyword, titleInLowerCase, false));
+                    indexOfContent = indexOfContent.concat(getIndexByWord(keyword, contentInLowerCase, false));
+                  });
+                  if (indexOfTitle.length > 0 || indexOfContent.length > 0) {
+                    isMatch = true;
+                    hitCount = indexOfTitle.length + indexOfContent.length;
+                  }
+                }
+
+                // show search results
+
+                if (isMatch) {
+                  // sort index by position of keyword
+
+                  [indexOfTitle, indexOfContent].forEach(function (index) {
+                    index.sort(function (itemLeft, itemRight) {
+                      if (itemRight.position !== itemLeft.position) {
+                        return itemRight.position - itemLeft.position;
+                      } else {
+                        return itemLeft.word.length - itemRight.word.length;
+                      }
+                    });
+                  });
+
+                  // merge hits into slices
+
+                  function mergeIntoSlice(text, start, end, index) {
+                    var item = index[index.length - 1];
+                    var position = item.position;
+                    var word = item.word;
+                    var hits = [];
+                    var searchTextCountInSlice = 0;
+                    while (position + word.length <= end && index.length != 0) {
+                      if (word === searchText) {
+                        searchTextCountInSlice++;
+                      }
+                      hits.push({position: position, length: word.length});
+                      var wordEnd = position + word.length;
+
+                      // move to next position of hit
+
+                      index.pop();
+                      while (index.length != 0) {
+                        item = index[index.length - 1];
+                        position = item.position;
+                        word = item.word;
+                        if (wordEnd > position) {
+                          index.pop();
+                        } else {
+                          break;
+                        }
+                      }
+                    }
+                    searchTextCount += searchTextCountInSlice;
+                    return {
+                      hits: hits,
+                      start: start,
+                      end: end,
+                      searchTextCount: searchTextCountInSlice
+                    };
+                  }
+
+                  var slicesOfTitle = [];
+                  if (indexOfTitle.length != 0) {
+                    slicesOfTitle.push(mergeIntoSlice(title, 0, title.length, indexOfTitle));
+                  }
+
+                  var slicesOfContent = [];
+                  while (indexOfContent.length != 0) {
+                    var item = indexOfContent[indexOfContent.length - 1];
+                    var position = item.position;
+                    var word = item.word;
+                    // cut out 100 characters
+                    var start = position - 20;
+                    var end = position + 80;
+                    if(start < 0){
+                      start = 0;
+                    }
+                    if (end < position + word.length) {
+                      end = position + word.length;
+                    }
+                    if(end > content.length){
+                      end = content.length;
+                    }
+                    slicesOfContent.push(mergeIntoSlice(content, start, end, indexOfContent));
+                  }
+
+                  // sort slices in content by search text's count and hits' count
+
+                  slicesOfContent.sort(function (sliceLeft, sliceRight) {
+                    if (sliceLeft.searchTextCount !== sliceRight.searchTextCount) {
+                      return sliceRight.searchTextCount - sliceLeft.searchTextCount;
+                    } else if (sliceLeft.hits.length !== sliceRight.hits.length) {
+                      return sliceRight.hits.length - sliceLeft.hits.length;
+                    } else {
+                      return sliceLeft.start - sliceRight.start;
+                    }
+                  });
+
+                  // select top N slices in content
+
+                  var upperBound = parseInt('1');
+                  if (upperBound >= 0) {
+                    slicesOfContent = slicesOfContent.slice(0, upperBound);
+                  }
+
+                  // highlight title and content
+
+                  function highlightKeyword(text, slice) {
+                    var result = '';
+                    var prevEnd = slice.start;
+                    slice.hits.forEach(function (hit) {
+                      result += text.substring(prevEnd, hit.position);
+                      var end = hit.position + hit.length;
+                      result += '<b class="search-keyword">' + text.substring(hit.position, end) + '</b>';
+                      prevEnd = end;
+                    });
+                    result += text.substring(prevEnd, slice.end);
+                    return result;
+                  }
+
+                  var resultItem = '';
+
+                  if (slicesOfTitle.length != 0) {
+                    resultItem += "<li><a href='" + articleUrl + "' class='search-result-title'>" + highlightKeyword(title, slicesOfTitle[0]) + "</a>";
+                  } else {
+                    resultItem += "<li><a href='" + articleUrl + "' class='search-result-title'>" + title + "</a>";
+                  }
+
+                  slicesOfContent.forEach(function (slice) {
+                    resultItem += "<a href='" + articleUrl + "'>" +
+                      "<p class=\"search-result\">" + highlightKeyword(content, slice) +
+                      "...</p>" + "</a>";
+                  });
+
+                  resultItem += "</li>";
+                  resultItems.push({
+                    item: resultItem,
+                    searchTextCount: searchTextCount,
+                    hitCount: hitCount,
+                    id: resultItems.length
+                  });
+                }
+              })
+            };
+            if (keywords.length === 1 && keywords[0] === "") {
+              resultContent.innerHTML = '<div id="no-result"><i class="fa fa-search fa-5x" /></div>'
+            } else if (resultItems.length === 0) {
+              resultContent.innerHTML = '<div id="no-result"><i class="fa fa-frown-o fa-5x" /></div>'
+            } else {
+              resultItems.sort(function (resultLeft, resultRight) {
+                if (resultLeft.searchTextCount !== resultRight.searchTextCount) {
+                  return resultRight.searchTextCount - resultLeft.searchTextCount;
+                } else if (resultLeft.hitCount !== resultRight.hitCount) {
+                  return resultRight.hitCount - resultLeft.hitCount;
+                } else {
+                  return resultRight.id - resultLeft.id;
+                }
+              });
+              var searchResultList = '<ul class=\"search-result-list\">';
+              resultItems.forEach(function (result) {
+                searchResultList += result.item;
+              })
+              searchResultList += "</ul>";
+              resultContent.innerHTML = searchResultList;
+            }
+          }
+
+          if ('auto' === 'auto') {
+            input.addEventListener('input', inputEventFunction);
+          } else {
+            $('.search-icon').click(inputEventFunction);
+            input.addEventListener('keypress', function (event) {
+              if (event.keyCode === 13) {
+                inputEventFunction();
+              }
+            });
+          }
+
+          // remove loading animation
+          $(".local-search-pop-overlay").remove();
+          $('body').css('overflow', '');
+
+          proceedsearch();
+        }
+      });
+    }
+
+    // handle and trigger popup window;
+    $('.popup-trigger').click(function(e) {
+      e.stopPropagation();
+      if (isfetched === false) {
+        searchFunc(path, 'local-search-input', 'local-search-result');
+      } else {
+        proceedsearch();
+      };
+    });
+
+    $('.popup-btn-close').click(onPopupClose);
+    $('.popup').click(function(e){
+      e.stopPropagation();
+    });
+    $(document).on('keyup', function (event) {
+      var shouldDismissSearchPopup = event.which === 27 &&
+        $('.search-popup').is(':visible');
+      if (shouldDismissSearchPopup) {
+        onPopupClose();
+      }
+    });
+  </script>
+
+
+
+
+
+  
+
+  
+
+  
+
+  
+  
+
+  
+
+  
+
+  
+
+</body>
+</html>

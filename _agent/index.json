@@ -1,5 +1,17 @@
 [
   {
+    "title": "工具要等用户点确认，别从外面把循环掐断：Agent 的 suspend 与 resume",
+    "date": "2026-11-16",
+    "url": "/2026/11/16/suspend-and-resume-agent-loop/",
+    "tags": [
+      "Agent",
+      "Agent Loop",
+      "Human-in-the-Loop",
+      "数问工作台"
+    ],
+    "file": "2026-11-16-suspend-and-resume-agent-loop.md"
+  },
+  {
     "title": "检索别凑够 topK 就往里塞：相关性门槛只看覆盖率，把 17.7% 的真问题也拦了",
     "date": "2026-11-15",
     "url": "/2026/11/15/retrieval-gate-coverage-and-idf/",
