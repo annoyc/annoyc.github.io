@@ -1,5 +1,17 @@
 [
   {
+    "title": "流式请求的“首帧重试”与三段超时：SSE 断在半路，为什么不能从头再来",
+    "date": "2026-11-17",
+    "url": "/2026/11/17/stream-first-event-retry-and-timeouts/",
+    "tags": [
+      "Agent",
+      "流式请求",
+      "错误恢复",
+      "数问工作台"
+    ],
+    "file": "2026-11-17-stream-first-event-retry-and-timeouts.md"
+  },
+  {
     "title": "意图路由别只给模型打个标签：简单问题要短路，模糊问题缺的是参数",
     "date": "2026-11-17",
     "url": "/2026/11/17/intent-router-needs-filter/",

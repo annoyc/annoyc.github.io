@@ -2,6 +2,82 @@
 <search>
 <!--agent-daily:start-->
   <entry>
+    <title>流式请求的“首帧重试”与三段超时：SSE 断在半路，为什么不能从头再来</title>
+    <url>/2026/11/17/stream-first-event-retry-and-timeouts/</url>
+    <content><![CDATA[<p>做前端的时候，给 <code>fetch</code> 封一个带重试的请求工具几乎是起手式：接口返回 429 或者 503，等个一两秒重发一遍，页面上连个报错都不需要弹。</p>
+<a id="more"></a>
+<p>刚开始在数问工作台里搭模型调用层时，我也照着这个直觉写了 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/client/retry.ts#L4-L31" target="_blank" rel="noopener"><code>withRetry</code></a>。普通 JSON 请求 <code>invoke()</code> 套上之后跑得挺稳，但写到流式输出的 <code>invokeStream()</code> 时，我犹豫了，最后干脆一行重试都没加。</p>
+<p>原因很现实：流式响应是一边从 <code>ReadableStream</code> 里往外读 chunk，一边通过 SSE 往前端推的。用户屏幕上已经看到模型吐出半句话，甚至前端工具卡片已经展开一半了，这时候如果连接突然断掉，你还能从头重发一遍请求吗？重发一遍，模型会从第一个字重新生成，聊天气泡里直接多出半截重复的废话。</p>
+<p>结果没跑几天就踩了反方向的坑。上游偶尔在刚建连那一刻吐一个 503 或者限流 429，一个字都还没吐出来，整轮对话就直接红字报错了。明明什么副作用都没发生，却连重连一次的机会都没有。</p>
+<p>后来我才想明白，流式请求不是“不能重试”，而是<strong>重试的窗口只开到“拿到第一个有效事件”那一刻为止</strong>。</p>
+<h2 id="重试门禁只包住建连-第一帧"><a href="#重试门禁只包住建连-第一帧" class="headerlink" title="重试门禁：只包住“建连 + 第一帧”"></a>重试门禁：只包住“建连 + 第一帧”</h2>
+<p>如果把普通 <code>fetch</code> 的重试直接套在 <code>for await (const chunk of stream)</code> 外面，一旦流吐过半块数据再抛错，重跑就会污染下游状态。</p>
+<p>反过来，如果只把 <code>fetch</code> 握手包进重试里，也不够。因为很多代理网关和模型服务端会先返回 <code>200 OK</code> 和响应头，然后才在读第一条 SSE 事件时吐错、超时或者断流。</p>
+<p>真正的边界在 <code>chunks.next()</code>。在数问工作台最近的修复（<a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/model/invoke.ts#L123-L139" target="_blank" rel="noopener"><code>src/core/model/invoke.ts</code></a>）里，做法很直接：把打开流和拉取第一个事件绑在一起放进 <code>withRetry</code>：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br></pre></td><td class="code"><pre><span class="line">const opened = await withRetry(async () =&gt; {</span><br><span class="line">  const chunks = apiStreamRequest(</span><br><span class="line">    url,</span><br><span class="line">    config.apiKey!,</span><br><span class="line">    body,</span><br><span class="line">    timeout,</span><br><span class="line">    params.signal,</span><br><span class="line">    { idleTimeoutMs: config.idleTimeout, deadlineMs: config.streamDeadline },</span><br><span class="line">  )</span><br><span class="line">  return { chunks, first: await chunks.next() }</span><br><span class="line">}, maxRetries, params.signal)</span><br><span class="line"></span><br><span class="line">stream = opened.chunks</span><br><span class="line"></span><br><span class="line">for (let next = opened.first; !next.done; next = await stream.next()) {</span><br><span class="line">  const chunk = next.value</span><br><span class="line">  // 累加 usage、output 并向调用方 yield chunk</span><br><span class="line">  yield chunk</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p>这里有一个很巧的对称性：</p>
+<ol>
+<li>在 <code>await chunks.next()</code> 返回之前，外层 <code>for await</code> 还没有消费到任何事件，前端的聊天气泡一个字也没收到。此时不管是 HTTP 返回 <code>429 / 500 / 502 / 503</code> 抛出 <code>ApiRequestError</code>，还是在拿到第一条有效 SSE 数据前建连失败，<a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/client/retry.ts#L17-L25" target="_blank" rel="noopener"><code>withRetry</code></a> 都可以安全地按 <code>Retry-After</code> 响应头，或者 <code>1000 * 2 ** attempt + 随机抖动</code> 等退避时间重新发一次请求。</li>
+<li>一旦 <code>opened.first</code> 拿到手，代码走出 <code>withRetry</code>，进入 <code>for</code> 循环把第一帧和后续帧逐个 <code>yield</code> 出去，重试门禁就永久关上了。如果流在吐完第一帧之后因为 <code>connection reset</code> 中途断掉，<a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/tests/agent-http.test.ts#L118-L134" target="_blank" rel="noopener"><code>tests/agent-http.test.ts</code></a> 里专门校验过：此时调用次数必须是 <code>1</code>，错误直接向上抛出，绝不会再重跑一次去污染已渲染的文本。</li>
+</ol>
+<p>顺便对照一下，Vercel AI SDK 的 <code>streamText</code> 里的 <code>maxRetries</code> 也是同样逻辑：只保驾到流真正开始输出为止，中途断流不会重头再来。</p>
+<h2 id="一个-timeout-管不住-SSE必须拆成三段时钟"><a href="#一个-timeout-管不住-SSE必须拆成三段时钟" class="headerlink" title="一个 timeout 管不住 SSE：必须拆成三段时钟"></a>一个 timeout 管不住 SSE：必须拆成三段时钟</h2>
+<p>解决了“什么时候能重试”，下一个立刻撞上的问题是：<strong>流式请求的超时到底该设多少秒？</strong></p>
+<p>写普通接口的时候，前端习惯给 <code>fetch</code> 塞一个 <code>AbortSignal.timeout(30000)</code>。这套做法搬到 Agent 的流式接口上，设短了必死，设长了也必死：</p>
+<ul>
+<li>设成 30 秒：遇到开启了深度思考（reasoning）或者要输出长段 SQL 分析报告的模型，前 20 秒可能在思考，后面持续吐字吐了 40 秒，结果第 30 秒一到，页面上“咔”一下被自己前端或中间层掐断了。</li>
+<li>设成 180 秒：正常任务是能跑完了，但如果上游网络抽风、TCP 连接半开在那里静默卡死，用户就得对着加载动画干等整整 3 分钟才能看见错误提示。</li>
+</ul>
+<p>问题在于，“等待模型开口”和“模型正在源源不断吐字”根本不是一回事。参考类似 Vercel AI SDK 里 <code>firstChunkMs</code> / <code>chunkMs</code> / <code>totalMs</code> 的拆分思路，我在数问工作台的 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/client/stream-request.ts#L5-L66" target="_blank" rel="noopener"><code>src/core/client/stream-request.ts</code></a> 和 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/model/types.ts#L62-L67" target="_blank" rel="noopener"><code>src/core/model/types.ts</code></a> 里，把一条流的超时拆成了三根独立的时钟：</p>
+<ol>
+<li><strong>首字节超时（<code>timeout</code>，默认 60 秒）</strong>：从发起请求到第一次 <code>reader.read()</code> 返回数据之间生效。超过 60 秒连个响动都没有，直接报 <code>Timed out waiting for first response byte</code>。</li>
+<li><strong>流内静默超时（<code>idleTimeoutMs</code>，默认 120 秒）</strong>：只要第一次读到字节，计时器就切到静默模式。之后每收到一块新数据，就重置一次闹钟。只要模型还在往外吐字（或者服务端还在发包），哪怕整段回答跑了一分半钟，也不会被打断；一旦连续 120 秒没有任何数据到达，立刻触发 <code>Response stream idle timeout</code>。</li>
+<li><strong>单次流总上限（<code>deadlineMs</code>，默认 180 秒）</strong>：用 <code>createAbortScope(signal, limits.deadlineMs ?? 180000)</code> 挂在整条请求上，兜底防止极慢的“滴水式”响应无限占着服务端连接不放。</li>
+</ol>
+<p>对应到 <code>apiStreamRequest</code> 的核心骨架，关键就在那两处 <code>armTimeout</code> 的切换：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br></pre></td><td class="code"><pre><span class="line">const scope = createAbortScope(signal, limits.deadlineMs ?? 180000)</span><br><span class="line">let timer: ReturnType&lt;typeof setTimeout&gt; | undefined</span><br><span class="line">const armTimeout = (ms: number, message: string) =&gt; {</span><br><span class="line">  if (timer) clearTimeout(timer)</span><br><span class="line">  if (ms &gt; 0) timer = setTimeout(() =&gt; scope.abort(new DOMException(message, 'TimeoutError')), ms)</span><br><span class="line">}</span><br><span class="line"></span><br><span class="line">// 1. 建连到拿到第一块响应体之间，受首字节超时约束</span><br><span class="line">armTimeout(timeout, 'Timed out waiting for first response byte')</span><br><span class="line">try {</span><br><span class="line">  const response = await abortable(fetch(url, {</span><br><span class="line">    method: 'POST',</span><br><span class="line">    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', Authorization: `Bearer ${apiKey}` },</span><br><span class="line">    body: JSON.stringify({ ...options, stream: true }),</span><br><span class="line">    signal: scope.signal,</span><br><span class="line">    redirect: 'error',</span><br><span class="line">  }), scope.signal)</span><br><span class="line"></span><br><span class="line">  const reader = response.body!.getReader()</span><br><span class="line">  while (true) {</span><br><span class="line">    const { done, value } = await abortable(reader.read(), scope.signal)</span><br><span class="line">    if (done) break</span><br><span class="line">    // 2. 只要开始收到数据，就切到流内静默看门狗，并随着每次读到分片重置</span><br><span class="line">    armTimeout(limits.idleTimeoutMs ?? 120000, 'Response stream idle timeout')</span><br><span class="line">    // ... 解码 UTF-8 并按行解析 SSE data: 事件</span><br><span class="line">  }</span><br><span class="line">} finally {</span><br><span class="line">  if (timer) clearTimeout(timer)</span><br><span class="line">  scope.abort()</span><br><span class="line">  // 取消并释放 reader 锁</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p>注意一个小细节：<code>armTimeout(timeout, ...)</code> 是在 <code>fetch()</code> 之前启动，直到第一次 <code>reader.read()</code> 成功返回之后，才被第 24 行的 <code>idleTimeoutMs</code> 覆盖。这样就把“服务端拿到请求头先返回 200、然后卡在首包前”的假死情况也一并盖住了。</p>
+<h2 id="写这段代码时踩过的几个真实坑"><a href="#写这段代码时踩过的几个真实坑" class="headerlink" title="写这段代码时踩过的几个真实坑"></a>写这段代码时踩过的几个真实坑</h2>
+<p>这套机制跑起来之后，还是陆续暴露过好几个前端转过来容易忽视的边缘问题。</p>
+<h3 id="坑一reader-没释放以及把用户点停止当成了重试信号"><a href="#坑一reader-没释放以及把用户点停止当成了重试信号" class="headerlink" title="坑一：reader 没释放，以及把用户“点停止”当成了重试信号"></a>坑一：reader 没释放，以及把用户“点停止”当成了重试信号</h3>
+<p>最早我觉得只要把 <code>scope.signal</code> 传给 <code>fetch()</code> 就万事大吉了。实测才发现，当 <code>fetch</code> 已经拿到响应头、代码卡在 <code>reader.read()</code> 等下一帧时，如果外部触发超时或者用户取消，部分运行时的底层流并不会立刻唤醒挂起的 <code>reader.read()</code>，甚至在异常处理漏掉释放步骤时，还会把 <code>response.body.locked</code> 一直锁死。</p>
+<p>所以在 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/client/lifecycle.ts#L21-L33" target="_blank" rel="noopener"><code>src/core/client/lifecycle.ts</code></a> 里，我们不仅把 <code>reader.read()</code> 包进 <code>abortable(reader.read(), scope.signal)</code> 让它在信号触发时立刻 reject，还必须在 <code>finally</code> 里显式执行 <code>void reader.cancel().catch(() =&gt; {}); reader.releaseLock()</code>；外层的 <code>invokeStream</code> 也同样在 <code>finally</code> 里调 <code>await stream?.return(undefined)</code>，保证哪怕消费方提前 <code>break</code> 跳出循环，上游连接也能第一时间关掉。</p>
+<p>另一个坑出在错误分类上。我之前写 <code>classifyError</code> 时，没有细拆 <code>TimeoutError</code> 和 <code>AbortError</code>。结果用户看模型跑偏了，在前端点了“停止生成”，触发了请求取消（<code>AbortError</code>），如果外层循环的错误钩子把它当成一般网络异常去重试，Agent 反而背着用户又悄悄重跑了一遍。后来我们在 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/errors.ts#L43-L61" target="_blank" rel="noopener"><code>src/core/errors.ts</code></a> 里硬性区分：<code>TimeoutError</code> 的 <code>retryable</code> 是 <code>true</code>，而 <code>AbortError</code> 标成 <code>type: 'aborted'</code>、<code>retryable: false</code>。取消是用户的明确决策，不是瞬时故障。</p>
+<h3 id="坑二SSE-拆行丢半包跨块乱码以及-redirect-error"><a href="#坑二SSE-拆行丢半包跨块乱码以及-redirect-error" class="headerlink" title="坑二：SSE 拆行丢半包、跨块乱码，以及 redirect: &#x27;error&#x27;"></a>坑二：SSE 拆行丢半包、跨块乱码，以及 <code>redirect: 'error'</code></h3>
+<p>手写 SSE 解析很容易把 <code>chunk</code> 直接按 <code>\n</code> 切开就 <code>JSON.parse</code>。真实网络下，一个 TCP 分片完全可能把一行 <code>data: {"choices":...}</code> 从中间劈成两半，甚至把一个三字节的中文 UTF-8 字符劈成前两个字节和后一个字节。如果 <code>TextDecoder.decode(value)</code> 漏传 <code>{ stream: true }</code>，中文边界必出乱码；如果没留一个 <code>buffer = lines.pop() || ''</code> 等下一块拼齐，半截 JSON 直接炸解析错误。</p>
+<p>另外一行看上去不起眼但很关键的配置是 <code>redirect: 'error'</code>。前端平时调同源接口很少关心重定向，但模型客户端的请求头里带着 <code>Authorization: Bearer &lt;apiKey&gt;</code>。一旦配置错了地址或者上游返回 307 跳到了其他域名，默认跟随重定向可能会把鉴权凭据顺手转走。强制 fail closed 之后，既不会自动跳转，也不会被 <code>withRetry</code> 误判成可重试错误。</p>
+<p>最后提一个目前特意留白的地方：在数问工作台当前的实现里，HTTP 客户端层的 <code>withRetry</code> 只重连 <code>429 / 500 / 502 / 503</code> 这几类 <code>ApiRequestError</code>；如果是在首字节阶段撞上 <code>TimeoutError</code>，HTTP 层本身不会自己重发，而是统一向上抛给 <code>agentLoop</code> 的 <code>classifyError</code> 和 <code>onError</code> 钩子去决定怎么处理。把每一层的重试职责划清楚，比到处嵌套隐式重试好排查得多。</p>
+<h2 id="小结"><a href="#小结" class="headerlink" title="小结"></a>小结</h2>
+<p>从前端的普通 HTTP 请求切到 Agent 的流式调用，请求层的改动其实就绕不开三件事：</p>
+<ul>
+<li>重试的门禁只能开到 <code>chunks.next()</code> 拿到第一个有效事件为止，之后掉线就老实报错，不能重头覆盖用户已经看到的内容；</li>
+<li>超时不能只写一个总毫秒数，要拆成“首字节等待”“流内静默间隔”和“整条流总上限”三根时钟；</li>
+<li><code>reader</code> 的取消与解锁、<code>AbortError</code>（用户取消）与 <code>TimeoutError</code>（超时）的区分，必须在边界上写清楚。</li>
+</ul>
+<p>把这几条线理顺了，Agent 在弱网和上游限流下的表现才算基本稳定。</p>
+<p>参考：</p>
+<ul>
+<li><a href="https://ai-sdk.dev/docs/reference/ai-sdk-core/stream-text" target="_blank" rel="noopener">streamText API Reference（Vercel AI SDK）</a></li>
+<li><a href="https://platform.claude.com/docs/en/api/messages-streaming" target="_blank" rel="noopener">Streaming Messages（Anthropic API Docs）</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat" target="_blank" rel="noopener">数问工作台 deepseek-db-chat</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/model/invoke.ts#L99-L160" target="_blank" rel="noopener">src/core/model/invoke.ts</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/client/stream-request.ts#L5-L66" target="_blank" rel="noopener">src/core/client/stream-request.ts</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/client/retry.ts#L4-L31" target="_blank" rel="noopener">src/core/client/retry.ts</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/client/lifecycle.ts#L1-L42" target="_blank" rel="noopener">src/core/client/lifecycle.ts</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/errors.ts#L37-L89" target="_blank" rel="noopener">src/core/errors.ts</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/tests/agent-http.test.ts#L91-L135" target="_blank" rel="noopener">tests/agent-http.test.ts</a></li>
+</ul>]]></content>
+    <categories>
+      <category>Agent</category>
+    </categories>
+    <tags>
+      <tag>Agent</tag>
+      <tag>流式请求</tag>
+      <tag>错误恢复</tag>
+      <tag>数问工作台</tag>
+    </tags>
+  </entry>
+  <entry>
     <title>意图路由别只给模型打个标签：简单问题要短路，模糊问题缺的是参数</title>
     <url>/2026/11/17/intent-router-needs-filter/</url>
     <content><![CDATA[<p>做前端的时候，处理路由守卫和表单校验是肌肉记忆：路由跳转前要检查权限，表单提交前要拿 Schema 校验每个字段是否合法。</p>
