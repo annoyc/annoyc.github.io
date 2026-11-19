@@ -1,0 +1,1065 @@
+<!DOCTYPE html>
+
+
+
+  
+
+
+<html class="theme-next mist use-motion" lang="zh-Hans">
+<head>
+  <meta charset="UTF-8"/>
+<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+<meta name="theme-color" content="#222">
+
+
+
+
+
+
+
+
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+  
+  <link href="/lib/fancybox/source/jquery.fancybox.css?v=2.1.5" rel="stylesheet" type="text/css" />
+
+
+
+
+
+
+
+<link href="/lib/font-awesome/css/font-awesome.min.css?v=4.6.2" rel="stylesheet" type="text/css" />
+
+<link href="/css/main.css?v=5.1.4" rel="stylesheet" type="text/css" />
+
+
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png?v=5.1.4">
+
+
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png?v=5.1.4">
+
+
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png?v=5.1.4">
+
+
+  <link rel="mask-icon" href="/images/logo.svg?v=5.1.4" color="#222">
+
+
+
+
+
+  <meta name="keywords" content="Agent,可观测性,隐私安全,数问工作台," />
+
+
+
+
+
+
+
+
+
+
+<meta name="description" content="做前端习惯了接 Sentry 和埋点：把入参、返回值和 error.message 一股脑上报，排查问题最省事。搬到查数据库的 Agent 上，这个习惯会直接把监控后台变成明文数据泄漏口。这篇结合数问工作台的 Langfuse + OpenTelemetry 接入，讲清楚怎么做到默认只报元数据、导出层兜底脱敏，以及为什么异常不能在 SDK 回调里直接 throw。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Agent 接入可观测性，别一上来就把 Prompt 和报错原文全传上去">
+<meta property="og:url" content="http://yc-sky.top/2026/11/19/telemetry-default-no-content-and-safe-errors/index.html">
+<meta property="og:site_name" content="Yc的博客">
+<meta property="og:description" content="做前端习惯了接 Sentry 和埋点：把入参、返回值和 error.message 一股脑上报，排查问题最省事。搬到查数据库的 Agent 上，这个习惯会直接把监控后台变成明文数据泄漏口。这篇结合数问工作台的 Langfuse + OpenTelemetry 接入，讲清楚怎么做到默认只报元数据、导出层兜底脱敏，以及为什么异常不能在 SDK 回调里直接 throw。">
+<meta property="article:published_time" content="2026-11-19T09:00:00.000Z">
+<meta property="article:modified_time" content="2026-11-19T09:00:00.000Z">
+<meta property="article:author" content="ycblue">
+<meta property="article:tag" content="Agent">
+<meta property="article:tag" content="可观测性">
+<meta property="article:tag" content="隐私安全">
+<meta property="article:tag" content="数问工作台">
+<meta name="twitter:card" content="summary">
+
+
+
+<script type="text/javascript" id="hexo.configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    root: '/',
+    scheme: 'Mist',
+    version: '5.1.4',
+    sidebar: {"position":"left","display":"hide","offset":12,"b2t":false,"scrollpercent":false,"onmobile":false},
+    fancybox: true,
+    tabs: true,
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}},
+    duoshuo: {
+      userId: '0',
+      author: '博主'
+    },
+    algolia: {
+      applicationID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    }
+  };
+</script>
+
+
+
+  <link rel="canonical" href="http://yc-sky.top/2026/11/19/telemetry-default-no-content-and-safe-errors/"/>
+
+
+
+
+
+  <title>Agent 接入可观测性，别一上来就把 Prompt 和报错原文全传上去 | Yc的博客</title>
+  
+
+
+
+
+
+
+
+
+<meta name="generator" content="Hexo 4.2.0"></head>
+
+<body itemscope itemtype="http://schema.org/WebPage" lang="zh-Hans">
+
+  
+  
+    
+  
+
+  <div class="container sidebar-position-left page-post-detail">
+    <div class="headband"></div>
+
+    <header id="header" class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-wrapper">
+  <div class="site-meta ">
+    
+
+    <div class="custom-logo-site-title">
+      <a href="/"  class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">Yc的博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+      
+        <p class="site-subtitle"></p>
+      
+  </div>
+
+  <div class="site-nav-toggle">
+    <button>
+      <span class="btn-bar"></span>
+      <span class="btn-bar"></span>
+      <span class="btn-bar"></span>
+    </button>
+  </div>
+</div>
+
+<nav class="site-nav">
+  
+
+  
+    <ul id="menu" class="menu">
+      
+        
+        <li class="menu-item menu-item-home">
+          <a href="/" rel="section">
+            
+              <i class="menu-item-icon fa fa-fw fa-home"></i> <br />
+            
+            首页
+          </a>
+        </li>
+      
+        
+        <li class="menu-item menu-item-agent">
+          <a href="/agent/" rel="section">
+              <i class="menu-item-icon fa fa-fw fa-lightbulb-o"></i> <br />
+            Agent
+          </a>
+        </li>
+        <li class="menu-item menu-item-tags">
+          <a href="/tags/" rel="section">
+            
+              <i class="menu-item-icon fa fa-fw fa-tags"></i> <br />
+            
+            标签
+          </a>
+        </li>
+      
+        
+        <li class="menu-item menu-item-archives">
+          <a href="/archives/" rel="section">
+            
+              <i class="menu-item-icon fa fa-fw fa-archive"></i> <br />
+            
+            归档
+          </a>
+        </li>
+      
+
+      
+        <li class="menu-item menu-item-search">
+          
+            <a href="javascript:;" class="popup-trigger">
+          
+            
+              <i class="menu-item-icon fa fa-search fa-fw"></i> <br />
+            
+            搜索
+          </a>
+        </li>
+      
+    </ul>
+  
+
+  
+    <div class="site-search">
+      
+  <div class="popup search-popup local-search-popup">
+  <div class="local-search-header clearfix">
+    <span class="search-icon">
+      <i class="fa fa-search"></i>
+    </span>
+    <span class="popup-btn-close">
+      <i class="fa fa-times-circle"></i>
+    </span>
+    <div class="local-search-input-wrapper">
+      <input autocomplete="off"
+             placeholder="搜索..." spellcheck="false"
+             type="text" id="local-search-input">
+    </div>
+  </div>
+  <div id="local-search-result"></div>
+</div>
+
+
+
+    </div>
+  
+</nav>
+
+
+
+ </div>
+    </header>
+
+    <main id="main" class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          <div id="content" class="content">
+            
+
+  <div id="posts" class="posts-expand">
+    
+
+  
+
+  
+  
+  
+
+  <article class="post post-type-normal" itemscope itemtype="http://schema.org/Article">
+  
+  
+  
+  <div class="post-block">
+    <link itemprop="mainEntityOfPage" href="http://yc-sky.top/2026/11/19/telemetry-default-no-content-and-safe-errors/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="name" content="ycblue">
+      <meta itemprop="description" content="">
+      <meta itemprop="image" content="https://cdn.jsdelivr.net/gh/yc2hang/cdn-assets/avatar/avatar.jpg">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="Yc的博客">
+    </span>
+
+    
+      <header class="post-header">
+
+        
+        
+          <h1 class="post-title" itemprop="name headline">Agent 接入可观测性，别一上来就把 Prompt 和报错原文全传上去</h1>
+        
+      </header>
+    
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+<p>做前端的时候，接入 Sentry 或者日志平台几乎是条件反射：把请求参数、响应体、<code>error.message</code>、堆栈和用户标识全打进去，线上出了 bug，打开后台一眼就能还原现场。</p>
+<a id="more"></a>
+<p>刚开始给数问工作台接 Langfuse（底层走 OpenTelemetry）时，我差点也照着这个习惯写。Agent 一轮对话要调好几次模型和工具，直觉上总觉得：不把完整的 <code>messages</code>、生成的 SQL 和模型输出全传上去，后台看个寂寞？</p>
+<p>动手之前我停下来翻了一眼一次普通查数请求里装着什么：用户的自然语言提问、表结构、拼出来的业务 SQL、数据库查回来的明细行（里面随时可能有手机号、身份证、邮箱），以及出错时驱动抛出来的连接信息。如果把这些直接塞进 Span 往外发，等于自己动手搭了一条把生产数据搬去监控后台的明文管道。</p>
+<p>后来去翻 OpenTelemetry 的 GenAI 语义规范（<code>semantic-conventions-genai</code>），发现规范里早就把这条线划得很清：<strong>默认只采运行遥测，Prompt 和 Completion 正文必须是显式 opt-in（默认关闭）</strong>。</p>
+<p>看明白这一点后，我在数问工作台里把可观测性拆成了三层防线：默认只报“骨架”、导出层统一兜底、异常信息剥离原文。</p>
+<h2 id="两道开关默认只报元数据正文单独-opt-in"><a href="#两道开关默认只报元数据正文单独-opt-in" class="headerlink" title="两道开关：默认只报元数据，正文单独 opt-in"></a>两道开关：默认只报元数据，正文单独 opt-in</h2>
+<p>配了 <code>LANGFUSE_PUBLIC_KEY</code> 和 <code>LANGFUSE_SECRET_KEY</code>，只代表“我要看系统跑得稳不稳、花了多少 token”，不代表“我同意把业务对话内容发出去”。</p>
+<p>在数问工作台的 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/telemetry.ts#L3-L22" target="_blank" rel="noopener"><code>src/core/telemetry.ts</code></a> 里，我把内容采集拆成了一个独立的环境变量 <code>LANGFUSE_CAPTURE_CONTENT</code>，默认关闭，同时给 <code>metadata</code> 上了严格白名单：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br></pre></td><td class="code"><pre><span class="line">/** Content capture is a separate opt-in from enabling operational telemetry. */</span><br><span class="line">export function captureTraceContent(): boolean {</span><br><span class="line">  return process.env.LANGFUSE_CAPTURE_CONTENT === 'true'</span><br><span class="line">}</span><br><span class="line"></span><br><span class="line">export function traceContent(value: unknown): unknown {</span><br><span class="line">  if (!captureTraceContent() || value === undefined) return undefined</span><br><span class="line">  try { return JSON.parse(maskPII(JSON.stringify(value))) } catch { return '[unavailable]' }</span><br><span class="line">}</span><br><span class="line"></span><br><span class="line">const METADATA_KEYS = new Set([</span><br><span class="line">  'provider', 'model', 'stream', 'messageCount', 'toolCount', 'columnCount',</span><br><span class="line">  'hasToolCalls', 'isContinuation', 'durationMs', 'status', 'errorType',</span><br><span class="line">])</span><br><span class="line"></span><br><span class="line">export function traceMetadata(metadata: Record&lt;string, unknown&gt; = {}): Record&lt;string, unknown&gt; {</span><br><span class="line">  return Object.fromEntries(Object.entries(metadata).filter(([key, value]) =&gt;</span><br><span class="line">    METADATA_KEYS.has(key) &amp;&amp; ['string', 'number', 'boolean'].includes(typeof value),</span><br><span class="line">  ).map(([key, value]) =&gt; [key, typeof value === 'string' ? maskPII(value).slice(0, 120) : value]))</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p>这里有两个刻意为之的设计：</p>
+<ol>
+<li><strong><code>input</code> 和 <code>output</code> 统一走 <code>traceContent()</code></strong>。在 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/model/invoke.ts#L62-L85" target="_blank" rel="noopener"><code>src/core/model/invoke.ts</code></a> 里，每次模型调用创建 <code>generation</code> 时，都会把 <code>body.messages</code> 和返回内容包一层 <code>traceContent()</code>。默认模式下它们直接变成 <code>undefined</code>，不上传任何正文；后台依然能完整看到模型名、<code>prompt_tokens / completion_tokens</code>、消息条数、工具数量、耗时和成功状态。真要在线下或合规允许的环境里排查提示词，显式打开 <code>LANGFUSE_CAPTURE_CONTENT=true</code> 之后，内容也会先过一遍 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/lib/masking.ts#L52-L81" target="_blank" rel="noopener"><code>maskPII()</code></a>，把身份证、银行卡、手机号、邮箱全部打码再发。</li>
+<li><strong><code>metadata</code> 用白名单，不用黑名单</strong>。前端写日志过滤很容易写黑名单，列几个 <code>password</code>、<code>token</code> 删掉完事。但在 Agent 项目里，业务字段随时会变，今天有人往 metadata 里塞一个 <code>database</code>，明天有人顺手塞一条 <code>sql</code> 或者 <code>ip</code>，黑名单永远堵不完。白名单只认 <code>METADATA_KEYS</code> 里这 11 个标量键，嵌套对象和未登记的键直接丢弃，字符串还要脱敏并截断到 120 字符。</li>
+</ol>
+<h2 id="导出层纵深防御别指望每处埋点都自觉"><a href="#导出层纵深防御别指望每处埋点都自觉" class="headerlink" title="导出层纵深防御：别指望每处埋点都自觉"></a>导出层纵深防御：别指望每处埋点都自觉</h2>
+<p>只在业务代码里调用 <code>traceContent()</code> 和 <code>traceMetadata()</code>，其实还不够保险。</p>
+<p>项目里建 Span 的地方不止一处：主对话、标题生成、幻觉检测、图表列分类、知识库问答都有各自的入口。只要以后加新功能时有一处忘了包 <code>traceContent()</code>，或者某个第三方库的自动埋点顺手把原始数据塞进了属性里，前面那套约定就形同虚设。</p>
+<p>前端平时写请求封装，习惯在统一的拦截器里做最后一道兜底。OpenTelemetry + Langfuse 也留了同样的口子：在 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/server/instrumentation.ts#L10-L18" target="_blank" rel="noopener"><code>src/server/instrumentation.ts</code></a> 初始化 <code>LangfuseSpanProcessor</code> 时，直接挂一个导出前钩子 <code>mask</code>：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line">export const langfuseSpanProcessor = isEnabled</span><br><span class="line">  ? new LangfuseSpanProcessor({ mask: ({ data }) =&gt; maskTelemetryAttribute(data) })</span><br><span class="line">  : undefined</span><br><span class="line"></span><br><span class="line">if (langfuseSpanProcessor) {</span><br><span class="line">  const sdk = new NodeSDK({</span><br><span class="line">    spanProcessors: [langfuseSpanProcessor],</span><br><span class="line">  })</span><br><span class="line">  sdk.start()</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p>对应的 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/telemetry.ts#L24-L32" target="_blank" rel="noopener"><code>maskTelemetryAttribute()</code></a> 逻辑很干脆：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">/** Defense in depth at the exporter, including observations created by other callers. */</span><br><span class="line">export function maskTelemetryAttribute(data: unknown): unknown {</span><br><span class="line">  if (captureTraceContent()) return traceContent(typeof data === 'string' ? parseAttribute(data) : data)</span><br><span class="line">  const value = typeof data === 'string' ? parseAttribute(data) : data</span><br><span class="line">  const safe = value &amp;&amp; typeof value === 'object' &amp;&amp; !Array.isArray(value)</span><br><span class="line">    ? traceMetadata(value as Record&lt;string, unknown&gt;)</span><br><span class="line">    : {}</span><br><span class="line">  return typeof data === 'string' ? JSON.stringify(safe) : safe</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p>所有即将离境的 <code>input</code>、<code>output</code>、<code>metadata</code> 属性都会经过这个函数。如果没开内容采集，就算某个调用方直接塞了 <code>{ input: 'secret', output: 'secret' }</code>，到导出层也会被洗成 <code>{}</code>；就算开了内容采集，也会再过一遍 <code>maskPII()</code> 才会发出去。</p>
+<h2 id="接入时踩过的两个隐蔽坑"><a href="#接入时踩过的两个隐蔽坑" class="headerlink" title="接入时踩过的两个隐蔽坑"></a>接入时踩过的两个隐蔽坑</h2>
+<p>上面两层写完，我以为防线已经严实了，结果在排查报错和用户标识时，又撞上两个特别容易漏掉的口子。</p>
+<h3 id="坑一异常不能在-SDK-回调里直接-throw"><a href="#坑一异常不能在-SDK-回调里直接-throw" class="headerlink" title="坑一：异常不能在 SDK 回调里直接 throw"></a>坑一：异常不能在 SDK 回调里直接 throw</h3>
+<p>写 <code>withTrace</code> 包装函数时，最自然的写法是在 <code>startActiveObservation</code> 的回调里 <code>try/catch</code>，记一下错误状态，然后把 <code>error</code> 原样 <code>throw</code> 出去，让外层业务照常处理。</p>
+<p>问题就出在这个 <code>throw</code> 上。OpenTelemetry 和 Langfuse 的 SDK 一旦在回调里接到未捕获的异常，会自动调用类似 <code>recordException</code> 的逻辑，把 <code>error.message</code> 和 stack trace 直接抄进 Span 的异常属性里。</p>
+<p>在后端跑数据库和模型请求时，<code>error.message</code> 往往比正文还危险：数据库连接失败可能带着 <code>mysql://root:password@db</code>，SQL 执行报错可能把整条查询语句和参数吐在报错里，上游模型 400 响应有时也会把部分请求文本原样带回来。你在业务层把 <code>input</code> 藏得再严实，一次报错直接从 <code>exception.message</code> 漏了个精光。</p>
+<p>后来在 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/server/langfuse.ts#L33-L56" target="_blank" rel="noopener"><code>src/server/langfuse.ts</code></a> 里，我把 <code>withTrace</code> 改成了“回调内吞掉、回调外重抛”：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br></pre></td><td class="code"><pre><span class="line">let failed = false</span><br><span class="line">let failure: unknown</span><br><span class="line">const result = await startActiveObservation(options.name, async (span) =&gt; {</span><br><span class="line">  if (options.input) span.update({ input: traceContent(options.input) })</span><br><span class="line">  if (options.metadata) span.update({ metadata: traceMetadata(options.metadata) })</span><br><span class="line"></span><br><span class="line">  try {</span><br><span class="line">    return await propagateAttributes({</span><br><span class="line">      userId,</span><br><span class="line">      sessionId: options.sessionId,</span><br><span class="line">      tags: options.tags,</span><br><span class="line">      traceName: options.name,</span><br><span class="line">    }, fn)</span><br><span class="line">  } catch (error) {</span><br><span class="line">    failed = true</span><br><span class="line">    failure = error</span><br><span class="line">    // End the observation normally, then rethrow outside the SDK callback so</span><br><span class="line">    // SDK exception attributes cannot copy SQL/provider response text.</span><br><span class="line">    span.update({ level: 'ERROR', statusMessage: traceError(error) })</span><br><span class="line">    return undefined</span><br><span class="line">  }</span><br><span class="line">})</span><br><span class="line">if (failed) throw failure</span><br><span class="line">return result as T</span><br></pre></td></tr></table></figure>
+<p>同时把 <code>statusMessage</code> 交给 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/telemetry.ts#L38-L43" target="_blank" rel="noopener"><code>traceError()</code></a> 归一化：只保留四个已知错误类名（<code>AbortError</code>、<code>TimeoutError</code>、<code>ApiRequestError</code>、<code>AgentError</code>），其他未知错误一律折成 <code>'RequestError'</code>，绝不传 <code>error.message</code>。</p>
+<p>这样一来，Span 正常结束，SDK 不会自动抄写异常原文；代码走出回调后 <code>if (failed) throw failure</code>，外层业务拿到的还是完整的原始错误对象，本地服务日志和错误恢复逻辑完全不受影响。</p>
+<h3 id="坑二别拿原始-IP-凑数当-userId以及流式结束时的-flush"><a href="#坑二别拿原始-IP-凑数当-userId以及流式结束时的-flush" class="headerlink" title="坑二：别拿原始 IP 凑数当 userId，以及流式结束时的 flush"></a>坑二：别拿原始 IP 凑数当 <code>userId</code>，以及流式结束时的 flush</h3>
+<p>很多教程里接追踪时，为了让后台能按用户聚合，在没有登录态的场景下会顺手把请求 IP 传给 <code>userId</code>。原始 IP 本身就是敏感标识，不应该默认当成遥测里的用户 ID。在 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/server/langfuse.ts#L18-L20" target="_blank" rel="noopener"><code>src/server/langfuse.ts</code></a> 里，<code>resolveUserId()</code> 默认直接返回 <code>undefined</code>，保持匿名，只有接了认证体系的调用方显式传入不透明的 <code>userId</code> 时才上报。</p>
+<p>另外在流式接口 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/server/functions/chat.ts#L113-L115" target="_blank" rel="noopener"><code>src/server/functions/chat.ts</code></a> 里，对话流结束的 <code>finally</code> 块里有一行：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">void flushTraces().catch(() =&gt; console.warn('[chat] Trace flush failed'))</span><br></pre></td></tr></table></figure>
+<p>因为 OpenTelemetry 的 Span 处理器默认按批次异步导出，短生命周期或流式响应结束后不主动 <code>forceFlush()</code>，最后几个 generation 很容易还没发出去就被丢掉；但也不能让可观测性反客为主去阻塞或弄崩主链路，所以用 <code>void</code> 触发并吞掉 flush 报错，只记一条本地 warn。</p>
+<p>为了防止以后重构时不小心把这几条底线改坏，我在 <a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/tests/agent-quality.test.ts#L54-L66" target="_blank" rel="noopener"><code>tests/agent-quality.test.ts</code></a> 里直接写了回归断言：默认模式下 <code>traceContent</code> 必须返回 <code>undefined</code>，<code>traceMetadata</code> 必须过滤掉 <code>database</code>、<code>ip</code>、<code>sql</code>，<code>traceError(new Error('mysql://root:password@db'))</code> 必须返回 <code>'RequestError'</code>；哪怕打开了 <code>LANGFUSE_CAPTURE_CONTENT=true</code>，手机号和邮箱也必须经过脱敏。</p>
+<h2 id="小结"><a href="#小结" class="headerlink" title="小结"></a>小结</h2>
+<p>给 Agent 接可观测性，和前端平时接埋点最大的区别在于：上下文里装的往往是真实业务数据和敏感凭证。</p>
+<ul>
+<li>默认只上报运行元数据（模型、token、耗时、消息数、错误类型），Prompt 和输出正文做成独立的 opt-in 开关，且开启后仍要过 PII 脱敏；</li>
+<li>Metadata 用白名单而不是黑名单，并在 SpanProcessor 导出层再挂一层 <code>mask</code> 做纵深防御；</li>
+<li>报错不要在 SDK 的 observation 回调里直接往外 <code>throw</code>，先把错误类名归一化记录、正常结束 Span，再在回调外面重抛。</li>
+</ul>
+<p>参考：</p>
+<ul>
+<li><a href="https://github.com/open-telemetry/semantic-conventions-genai" target="_blank" rel="noopener">OpenTelemetry GenAI Semantic Conventions</a></li>
+<li><a href="https://langfuse.com/docs/observability/features/masking" target="_blank" rel="noopener">Masking Sensitive Data（Langfuse Docs）</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat" target="_blank" rel="noopener">数问工作台 deepseek-db-chat</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/telemetry.ts#L1-L43" target="_blank" rel="noopener">src/core/telemetry.ts</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/server/instrumentation.ts#L1-L19" target="_blank" rel="noopener">src/server/instrumentation.ts</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/server/langfuse.ts#L18-L63" target="_blank" rel="noopener">src/server/langfuse.ts</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/src/core/model/invoke.ts#L62-L96" target="_blank" rel="noopener">src/core/model/invoke.ts</a></li>
+<li><a href="https://github.com/annoyc/deepseek-db-chat/blob/7fc6c9f0bc10feddcf63978e2b89b1be5a83b774/tests/agent-quality.test.ts#L54-L66" target="_blank" rel="noopener">tests/agent-quality.test.ts</a></li>
+</ul>
+    </div>
+
+    <footer class="post-footer">
+        <div class="post-tags">
+          <a href="/agent/" rel="tag"># Agent</a>
+          <a href="/agent/" rel="tag"># 可观测性</a>
+          <a href="/agent/" rel="tag"># 隐私安全</a>
+          <a href="/agent/" rel="tag"># 数问工作台</a>
+        </div>
+        <div class="post-nav">
+          <div class="post-nav-next post-nav-item">
+              <a href="/2026/11/17/stream-first-event-retry-and-timeouts/" rel="next" title="流式请求的“首帧重试”与三段超时：SSE 断在半路，为什么不能从头再来">
+                <i class="fa fa-chevron-left"></i> 流式请求的“首帧重试”与三段超时：SSE 断在半路，为什么不能从头再来
+              </a>
+          </div>
+          <span class="post-nav-divider"></span>
+          <div class="post-nav-prev post-nav-item">
+              
+          </div>
+        </div>
+    </footer>
+  </div>
+  
+  
+  
+  </article>
+
+
+
+    <div class="post-spread">
+      
+    </div>
+  </div>
+
+
+          </div>
+          
+
+
+          
+
+  
+
+
+
+        </div>
+        
+          
+  
+  <div class="sidebar-toggle">
+    <div class="sidebar-toggle-line-wrap">
+      <span class="sidebar-toggle-line sidebar-toggle-line-first"></span>
+      <span class="sidebar-toggle-line sidebar-toggle-line-middle"></span>
+      <span class="sidebar-toggle-line sidebar-toggle-line-last"></span>
+    </div>
+  </div>
+
+  <aside id="sidebar" class="sidebar">
+    
+    <div class="sidebar-inner">
+
+      
+
+      
+        <ul class="sidebar-nav motion-element">
+          <li class="sidebar-nav-toc sidebar-nav-active" data-target="post-toc-wrap">
+            文章目录
+          </li>
+          <li class="sidebar-nav-overview" data-target="site-overview-wrap">
+            站点概览
+          </li>
+        </ul>
+      
+
+      <section class="site-overview-wrap sidebar-panel">
+        <div class="site-overview">
+          <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+            
+              <img class="site-author-image" itemprop="image"
+                src="https://cdn.jsdelivr.net/gh/yc2hang/cdn-assets/avatar/avatar.jpg"
+                alt="ycblue" />
+            
+              <p class="site-author-name" itemprop="name">ycblue</p>
+              <p class="site-description motion-element" itemprop="description">stay hungry, stay foolish</p>
+          </div>
+
+          <nav class="site-state motion-element">
+
+            
+              <div class="site-state-item site-state-posts">
+              
+                <a href="/archives/%7C%7Carchive">
+              
+                  <span class="site-state-item-count">30</span>
+                  <span class="site-state-item-name">日志</span>
+                </a>
+              </div>
+            
+
+            
+              
+              
+              <div class="site-state-item site-state-categories">
+                <a href="/categories/index.html">
+                  <span class="site-state-item-count">3</span>
+                  <span class="site-state-item-name">分类</span>
+                </a>
+              </div>
+            
+
+            
+              
+              
+              <div class="site-state-item site-state-tags">
+                <a href="/tags/index.html">
+                  <span class="site-state-item-count">14</span>
+                  <span class="site-state-item-name">标签</span>
+                </a>
+              </div>
+            
+
+          </nav>
+
+          
+
+          
+            <div class="links-of-author motion-element">
+                
+                  <span class="links-of-author-item">
+                    <a href="https://github.com/yc2hang" target="_blank" title="GitHub">
+                      
+                        <i class="fa fa-fw fa-github"></i>GitHub</a>
+                  </span>
+                
+                  <span class="links-of-author-item">
+                    <a href="mailto:yc2hangycz@gmail.com" target="_blank" title="E-Mail">
+                      
+                        <i class="fa fa-fw fa-envelope"></i>E-Mail</a>
+                  </span>
+                
+            </div>
+          
+
+          
+          
+
+          
+          
+
+          
+
+        </div>
+      </section>
+
+      
+      <!--noindex-->
+        <section class="post-toc-wrap motion-element sidebar-panel sidebar-panel-active">
+          <div class="post-toc">
+
+            
+              
+            
+
+            
+              <div class="post-toc-content"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#两道开关默认只报元数据正文单独-opt-in"><span class="nav-number">1.</span> <span class="nav-text">两道开关：默认只报元数据，正文单独 opt-in</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#导出层纵深防御别指望每处埋点都自觉"><span class="nav-number">2.</span> <span class="nav-text">导出层纵深防御：别指望每处埋点都自觉</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#接入时踩过的两个隐蔽坑"><span class="nav-number">3.</span> <span class="nav-text">接入时踩过的两个隐蔽坑</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#坑一异常不能在-SDK-回调里直接-throw"><span class="nav-number">3.1.</span> <span class="nav-text">坑一：异常不能在 SDK 回调里直接 throw</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#坑二别拿原始-IP-凑数当-userId以及流式结束时的-flush"><span class="nav-number">3.2.</span> <span class="nav-text">坑二：别拿原始 IP 凑数当 userId，以及流式结束时的 flush</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#小结"><span class="nav-number">4.</span> <span class="nav-text">小结</span></a></li></ol></div>
+            
+
+          </div>
+        </section>
+      <!--/noindex-->
+      
+
+      
+
+    </div>
+  </aside>
+
+
+        
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="footer-inner">
+        <div class="copyright">&copy; <span itemprop="copyrightYear">2025</span>
+  <span class="with-love">
+    <i class="fa fa-heart"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">ycblue</span>
+
+  
+</div>
+
+
+  <div class="powered-by">由 <a class="theme-link" target="_blank" href="https://hexo.io">Hexo</a> 强力驱动</div>
+
+
+
+  <span class="post-meta-divider">|</span>
+
+
+
+  <div class="theme-info">主题 &mdash; <a class="theme-link" target="_blank" href="https://github.com/iissnan/hexo-theme-next">NexT.Mist</a> v5.1.4</div>
+
+
+
+
+        
+
+
+
+
+
+
+
+        
+      </div>
+    </footer>
+
+    
+      <div class="back-to-top">
+        <i class="fa fa-arrow-up"></i>
+        
+      </div>
+    
+
+    
+
+  </div>
+
+  
+
+<script type="text/javascript">
+  if (Object.prototype.toString.call(window.Promise) !== '[object Function]') {
+    window.Promise = null;
+  }
+</script>
+
+
+
+
+
+
+
+
+
+  
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+  
+  
+    <script type="text/javascript" src="/lib/jquery/index.js?v=2.1.3"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/fastclick/lib/fastclick.min.js?v=1.0.6"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/jquery_lazyload/jquery.lazyload.js?v=1.9.7"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/velocity/velocity.min.js?v=1.2.1"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/velocity/velocity.ui.min.js?v=1.2.1"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/fancybox/source/jquery.fancybox.pack.js?v=2.1.5"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/canvas-nest/canvas-nest.min.js"></script>
+  
+
+
+  
+
+
+  <script type="text/javascript" src="/js/src/utils.js?v=5.1.4"></script>
+
+  <script type="text/javascript" src="/js/src/motion.js?v=5.1.4"></script>
+
+
+
+  
+  
+
+  
+  <script type="text/javascript" src="/js/src/scrollspy.js?v=5.1.4"></script>
+<script type="text/javascript" src="/js/src/post-details.js?v=5.1.4"></script>
+
+
+
+  
+
+
+  <script type="text/javascript" src="/js/src/bootstrap.js?v=5.1.4"></script>
+
+
+
+  
+
+
+  
+
+
+
+
+	
+
+
+
+
+
+  
+
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  <script type="text/javascript">
+    // Popup Window;
+    var isfetched = false;
+    var isXml = true;
+    // Search DB path;
+    var search_path = "search.xml";
+    if (search_path.length === 0) {
+      search_path = "search.xml";
+    } else if (/json$/i.test(search_path)) {
+      isXml = false;
+    }
+    var path = "/" + search_path;
+    // monitor main search box;
+
+    var onPopupClose = function (e) {
+      $('.popup').hide();
+      $('#local-search-input').val('');
+      $('.search-result-list').remove();
+      $('#no-result').remove();
+      $(".local-search-pop-overlay").remove();
+      $('body').css('overflow', '');
+    }
+
+    function proceedsearch() {
+      $("body")
+        .append('<div class="search-popup-overlay local-search-pop-overlay"></div>')
+        .css('overflow', 'hidden');
+      $('.search-popup-overlay').click(onPopupClose);
+      $('.popup').toggle();
+      var $localSearchInput = $('#local-search-input');
+      $localSearchInput.attr("autocapitalize", "none");
+      $localSearchInput.attr("autocorrect", "off");
+      $localSearchInput.focus();
+    }
+
+    // search function;
+    var searchFunc = function(path, search_id, content_id) {
+      'use strict';
+
+      // start loading animation
+      $("body")
+        .append('<div class="search-popup-overlay local-search-pop-overlay">' +
+          '<div id="search-loading-icon">' +
+          '<i class="fa fa-spinner fa-pulse fa-5x fa-fw"></i>' +
+          '</div>' +
+          '</div>')
+        .css('overflow', 'hidden');
+      $("#search-loading-icon").css('margin', '20% auto 0 auto').css('text-align', 'center');
+
+      $.ajax({
+        url: path,
+        dataType: isXml ? "xml" : "json",
+        async: true,
+        success: function(res) {
+          // get the contents from search data
+          isfetched = true;
+          $('.popup').detach().appendTo('.header-inner');
+          var datas = isXml ? $("entry", res).map(function() {
+            return {
+              title: $("title", this).text(),
+              content: $("content",this).text(),
+              url: $("url" , this).text()
+            };
+          }).get() : res;
+          var input = document.getElementById(search_id);
+          var resultContent = document.getElementById(content_id);
+          var inputEventFunction = function() {
+            var searchText = input.value.trim().toLowerCase();
+            var keywords = searchText.split(/[\s\-]+/);
+            if (keywords.length > 1) {
+              keywords.push(searchText);
+            }
+            var resultItems = [];
+            if (searchText.length > 0) {
+              // perform local searching
+              datas.forEach(function(data) {
+                var isMatch = false;
+                var hitCount = 0;
+                var searchTextCount = 0;
+                var title = data.title.trim();
+                var titleInLowerCase = title.toLowerCase();
+                var content = data.content.trim().replace(/<[^>]+>/g,"");
+                var contentInLowerCase = content.toLowerCase();
+                var articleUrl = decodeURIComponent(data.url);
+                var indexOfTitle = [];
+                var indexOfContent = [];
+                // only match articles with not empty titles
+                if(title != '') {
+                  keywords.forEach(function(keyword) {
+                    function getIndexByWord(word, text, caseSensitive) {
+                      var wordLen = word.length;
+                      if (wordLen === 0) {
+                        return [];
+                      }
+                      var startPosition = 0, position = [], index = [];
+                      if (!caseSensitive) {
+                        text = text.toLowerCase();
+                        word = word.toLowerCase();
+                      }
+                      while ((position = text.indexOf(word, startPosition)) > -1) {
+                        index.push({position: position, word: word});
+                        startPosition = position + wordLen;
+                      }
+                      return index;
+                    }
+
+                    indexOfTitle = indexOfTitle.concat(getIndexByWord(keyword, titleInLowerCase, false));
+                    indexOfContent = indexOfContent.concat(getIndexByWord(keyword, contentInLowerCase, false));
+                  });
+                  if (indexOfTitle.length > 0 || indexOfContent.length > 0) {
+                    isMatch = true;
+                    hitCount = indexOfTitle.length + indexOfContent.length;
+                  }
+                }
+
+                // show search results
+
+                if (isMatch) {
+                  // sort index by position of keyword
+
+                  [indexOfTitle, indexOfContent].forEach(function (index) {
+                    index.sort(function (itemLeft, itemRight) {
+                      if (itemRight.position !== itemLeft.position) {
+                        return itemRight.position - itemLeft.position;
+                      } else {
+                        return itemLeft.word.length - itemRight.word.length;
+                      }
+                    });
+                  });
+
+                  // merge hits into slices
+
+                  function mergeIntoSlice(text, start, end, index) {
+                    var item = index[index.length - 1];
+                    var position = item.position;
+                    var word = item.word;
+                    var hits = [];
+                    var searchTextCountInSlice = 0;
+                    while (position + word.length <= end && index.length != 0) {
+                      if (word === searchText) {
+                        searchTextCountInSlice++;
+                      }
+                      hits.push({position: position, length: word.length});
+                      var wordEnd = position + word.length;
+
+                      // move to next position of hit
+
+                      index.pop();
+                      while (index.length != 0) {
+                        item = index[index.length - 1];
+                        position = item.position;
+                        word = item.word;
+                        if (wordEnd > position) {
+                          index.pop();
+                        } else {
+                          break;
+                        }
+                      }
+                    }
+                    searchTextCount += searchTextCountInSlice;
+                    return {
+                      hits: hits,
+                      start: start,
+                      end: end,
+                      searchTextCount: searchTextCountInSlice
+                    };
+                  }
+
+                  var slicesOfTitle = [];
+                  if (indexOfTitle.length != 0) {
+                    slicesOfTitle.push(mergeIntoSlice(title, 0, title.length, indexOfTitle));
+                  }
+
+                  var slicesOfContent = [];
+                  while (indexOfContent.length != 0) {
+                    var item = indexOfContent[indexOfContent.length - 1];
+                    var position = item.position;
+                    var word = item.word;
+                    // cut out 100 characters
+                    var start = position - 20;
+                    var end = position + 80;
+                    if(start < 0){
+                      start = 0;
+                    }
+                    if (end < position + word.length) {
+                      end = position + word.length;
+                    }
+                    if(end > content.length){
+                      end = content.length;
+                    }
+                    slicesOfContent.push(mergeIntoSlice(content, start, end, indexOfContent));
+                  }
+
+                  // sort slices in content by search text's count and hits' count
+
+                  slicesOfContent.sort(function (sliceLeft, sliceRight) {
+                    if (sliceLeft.searchTextCount !== sliceRight.searchTextCount) {
+                      return sliceRight.searchTextCount - sliceLeft.searchTextCount;
+                    } else if (sliceLeft.hits.length !== sliceRight.hits.length) {
+                      return sliceRight.hits.length - sliceLeft.hits.length;
+                    } else {
+                      return sliceLeft.start - sliceRight.start;
+                    }
+                  });
+
+                  // select top N slices in content
+
+                  var upperBound = parseInt('1');
+                  if (upperBound >= 0) {
+                    slicesOfContent = slicesOfContent.slice(0, upperBound);
+                  }
+
+                  // highlight title and content
+
+                  function highlightKeyword(text, slice) {
+                    var result = '';
+                    var prevEnd = slice.start;
+                    slice.hits.forEach(function (hit) {
+                      result += text.substring(prevEnd, hit.position);
+                      var end = hit.position + hit.length;
+                      result += '<b class="search-keyword">' + text.substring(hit.position, end) + '</b>';
+                      prevEnd = end;
+                    });
+                    result += text.substring(prevEnd, slice.end);
+                    return result;
+                  }
+
+                  var resultItem = '';
+
+                  if (slicesOfTitle.length != 0) {
+                    resultItem += "<li><a href='" + articleUrl + "' class='search-result-title'>" + highlightKeyword(title, slicesOfTitle[0]) + "</a>";
+                  } else {
+                    resultItem += "<li><a href='" + articleUrl + "' class='search-result-title'>" + title + "</a>";
+                  }
+
+                  slicesOfContent.forEach(function (slice) {
+                    resultItem += "<a href='" + articleUrl + "'>" +
+                      "<p class=\"search-result\">" + highlightKeyword(content, slice) +
+                      "...</p>" + "</a>";
+                  });
+
+                  resultItem += "</li>";
+                  resultItems.push({
+                    item: resultItem,
+                    searchTextCount: searchTextCount,
+                    hitCount: hitCount,
+                    id: resultItems.length
+                  });
+                }
+              })
+            };
+            if (keywords.length === 1 && keywords[0] === "") {
+              resultContent.innerHTML = '<div id="no-result"><i class="fa fa-search fa-5x" /></div>'
+            } else if (resultItems.length === 0) {
+              resultContent.innerHTML = '<div id="no-result"><i class="fa fa-frown-o fa-5x" /></div>'
+            } else {
+              resultItems.sort(function (resultLeft, resultRight) {
+                if (resultLeft.searchTextCount !== resultRight.searchTextCount) {
+                  return resultRight.searchTextCount - resultLeft.searchTextCount;
+                } else if (resultLeft.hitCount !== resultRight.hitCount) {
+                  return resultRight.hitCount - resultLeft.hitCount;
+                } else {
+                  return resultRight.id - resultLeft.id;
+                }
+              });
+              var searchResultList = '<ul class=\"search-result-list\">';
+              resultItems.forEach(function (result) {
+                searchResultList += result.item;
+              })
+              searchResultList += "</ul>";
+              resultContent.innerHTML = searchResultList;
+            }
+          }
+
+          if ('auto' === 'auto') {
+            input.addEventListener('input', inputEventFunction);
+          } else {
+            $('.search-icon').click(inputEventFunction);
+            input.addEventListener('keypress', function (event) {
+              if (event.keyCode === 13) {
+                inputEventFunction();
+              }
+            });
+          }
+
+          // remove loading animation
+          $(".local-search-pop-overlay").remove();
+          $('body').css('overflow', '');
+
+          proceedsearch();
+        }
+      });
+    }
+
+    // handle and trigger popup window;
+    $('.popup-trigger').click(function(e) {
+      e.stopPropagation();
+      if (isfetched === false) {
+        searchFunc(path, 'local-search-input', 'local-search-result');
+      } else {
+        proceedsearch();
+      };
+    });
+
+    $('.popup-btn-close').click(onPopupClose);
+    $('.popup').click(function(e){
+      e.stopPropagation();
+    });
+    $(document).on('keyup', function (event) {
+      var shouldDismissSearchPopup = event.which === 27 &&
+        $('.search-popup').is(':visible');
+      if (shouldDismissSearchPopup) {
+        onPopupClose();
+      }
+    });
+  </script>
+
+
+
+
+
+  
+
+  
+
+  
+
+  
+  
+
+  
+
+  
+
+  
+
+</body>
+</html>

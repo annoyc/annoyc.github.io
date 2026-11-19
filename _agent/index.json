@@ -1,5 +1,17 @@
 [
   {
+    "title": "Agent 接入可观测性，别一上来就把 Prompt 和报错原文全传上去",
+    "date": "2026-11-19",
+    "url": "/2026/11/19/telemetry-default-no-content-and-safe-errors/",
+    "tags": [
+      "Agent",
+      "可观测性",
+      "隐私安全",
+      "数问工作台"
+    ],
+    "file": "2026-11-19-telemetry-default-no-content-and-safe-errors.md"
+  },
+  {
     "title": "流式请求的“首帧重试”与三段超时：SSE 断在半路，为什么不能从头再来",
     "date": "2026-11-17",
     "url": "/2026/11/17/stream-first-event-retry-and-timeouts/",
