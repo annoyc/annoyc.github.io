@@ -1,5 +1,16 @@
 [
   {
+    "title": "Agent 跨会话记忆怎么管：别只靠“随手记笔记”，还得靠离线“做梦”纠错",
+    "date": "2026-11-20",
+    "url": "/2026/11/20/agent-memory-and-dreaming/",
+    "tags": [
+      "Agent",
+      "Agent Memory",
+      "Context Engineering"
+    ],
+    "file": "2026-11-20-agent-memory-and-dreaming.md"
+  },
+  {
     "title": "Agent 接入可观测性，别一上来就把 Prompt 和报错原文全传上去",
     "date": "2026-11-19",
     "url": "/2026/11/19/telemetry-default-no-content-and-safe-errors/",
