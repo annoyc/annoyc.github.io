@@ -1,5 +1,16 @@
 [
   {
+    "title": "常驻 Agent 不是写个死循环：事件收件箱、单活唤醒与 Outbox 节流",
+    "date": "2026-11-23",
+    "url": "/2026/11/23/always-on-agent-inbox-and-outbox/",
+    "tags": [
+      "Agent",
+      "Always-on Agent",
+      "架构设计"
+    ],
+    "file": "2026-11-23-always-on-agent-inbox-and-outbox.md"
+  },
+  {
     "title": "Agent 跨会话记忆怎么管：别只靠“随手记笔记”，还得靠离线“做梦”纠错",
     "date": "2026-11-20",
     "url": "/2026/11/20/agent-memory-and-dreaming/",

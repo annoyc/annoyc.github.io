@@ -1,0 +1,1059 @@
+<!DOCTYPE html>
+
+
+
+  
+
+
+<html class="theme-next mist use-motion" lang="zh-Hans">
+<head>
+  <meta charset="UTF-8"/>
+<meta http-equiv="X-UA-Compatible" content="IE=edge" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+<meta name="theme-color" content="#222">
+
+
+
+
+
+
+
+
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+  
+  <link href="/lib/fancybox/source/jquery.fancybox.css?v=2.1.5" rel="stylesheet" type="text/css" />
+
+
+
+
+
+
+
+<link href="/lib/font-awesome/css/font-awesome.min.css?v=4.6.2" rel="stylesheet" type="text/css" />
+
+<link href="/css/main.css?v=5.1.4" rel="stylesheet" type="text/css" />
+
+
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png?v=5.1.4">
+
+
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png?v=5.1.4">
+
+
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png?v=5.1.4">
+
+
+  <link rel="mask-icon" href="/images/logo.svg?v=5.1.4" color="#222">
+
+
+
+
+
+  <meta name="keywords" content="Agent,Always-on Agent,架构设计," />
+
+
+
+
+
+
+
+
+
+
+<meta name="description" content="聊天型 Agent 是用户问一句它答一句，想做成 7x24 后台主动干活的 Always-on Agent，最容易踩的坑就是让 Webhook 和定时任务直接调模型。结合 Anthropic 和 LangChain 最近公开的工程实践，拆解“事件收件箱 + 单活串行唤醒 + Outbox 发件箱”这套骨架，以及为什么“允许什么都不发”比会回复更重要。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="常驻 Agent 不是写个死循环：事件收件箱、单活唤醒与 Outbox 节流">
+<meta property="og:url" content="http://yc-sky.top/2026/11/23/always-on-agent-inbox-and-outbox/index.html">
+<meta property="og:site_name" content="Yc的博客">
+<meta property="og:description" content="聊天型 Agent 是用户问一句它答一句，想做成 7x24 后台主动干活的 Always-on Agent，最容易踩的坑就是让 Webhook 和定时任务直接调模型。结合 Anthropic 和 LangChain 最近公开的工程实践，拆解“事件收件箱 + 单活串行唤醒 + Outbox 发件箱”这套骨架，以及为什么“允许什么都不发”比会回复更重要。">
+<meta property="article:published_time" content="2026-11-23T08:00:00.000Z">
+<meta property="article:modified_time" content="2026-11-23T08:00:00.000Z">
+<meta property="article:author" content="ycblue">
+<meta property="article:tag" content="Agent">
+<meta property="article:tag" content="Always-on Agent">
+<meta property="article:tag" content="架构设计">
+<meta name="twitter:card" content="summary">
+
+
+
+<script type="text/javascript" id="hexo.configurations">
+  var NexT = window.NexT || {};
+  var CONFIG = {
+    root: '/',
+    scheme: 'Mist',
+    version: '5.1.4',
+    sidebar: {"position":"left","display":"hide","offset":12,"b2t":false,"scrollpercent":false,"onmobile":false},
+    fancybox: true,
+    tabs: true,
+    motion: {"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}},
+    duoshuo: {
+      userId: '0',
+      author: '博主'
+    },
+    algolia: {
+      applicationID: '',
+      apiKey: '',
+      indexName: '',
+      hits: {"per_page":10},
+      labels: {"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}
+    }
+  };
+</script>
+
+
+
+  <link rel="canonical" href="http://yc-sky.top/2026/11/23/always-on-agent-inbox-and-outbox/"/>
+
+
+
+
+
+  <title>常驻 Agent 不是写个死循环：事件收件箱、单活唤醒与 Outbox 节流 | Yc的博客</title>
+  
+
+
+
+
+
+
+
+
+<meta name="generator" content="Hexo 4.2.0"></head>
+
+<body itemscope itemtype="http://schema.org/WebPage" lang="zh-Hans">
+
+  
+  
+    
+  
+
+  <div class="container sidebar-position-left page-post-detail">
+    <div class="headband"></div>
+
+    <header id="header" class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-wrapper">
+  <div class="site-meta ">
+    
+
+    <div class="custom-logo-site-title">
+      <a href="/"  class="brand" rel="start">
+        <span class="logo-line-before"><i></i></span>
+        <span class="site-title">Yc的博客</span>
+        <span class="logo-line-after"><i></i></span>
+      </a>
+    </div>
+      
+        <p class="site-subtitle"></p>
+      
+  </div>
+
+  <div class="site-nav-toggle">
+    <button>
+      <span class="btn-bar"></span>
+      <span class="btn-bar"></span>
+      <span class="btn-bar"></span>
+    </button>
+  </div>
+</div>
+
+<nav class="site-nav">
+  
+
+  
+    <ul id="menu" class="menu">
+      
+        
+        <li class="menu-item menu-item-home">
+          <a href="/" rel="section">
+            
+              <i class="menu-item-icon fa fa-fw fa-home"></i> <br />
+            
+            首页
+          </a>
+        </li>
+      
+        
+        <li class="menu-item menu-item-agent">
+          <a href="/agent/" rel="section">
+              <i class="menu-item-icon fa fa-fw fa-lightbulb-o"></i> <br />
+            Agent
+          </a>
+        </li>
+        <li class="menu-item menu-item-tags">
+          <a href="/tags/" rel="section">
+            
+              <i class="menu-item-icon fa fa-fw fa-tags"></i> <br />
+            
+            标签
+          </a>
+        </li>
+      
+        
+        <li class="menu-item menu-item-archives">
+          <a href="/archives/" rel="section">
+            
+              <i class="menu-item-icon fa fa-fw fa-archive"></i> <br />
+            
+            归档
+          </a>
+        </li>
+      
+
+      
+        <li class="menu-item menu-item-search">
+          
+            <a href="javascript:;" class="popup-trigger">
+          
+            
+              <i class="menu-item-icon fa fa-search fa-fw"></i> <br />
+            
+            搜索
+          </a>
+        </li>
+      
+    </ul>
+  
+
+  
+    <div class="site-search">
+      
+  <div class="popup search-popup local-search-popup">
+  <div class="local-search-header clearfix">
+    <span class="search-icon">
+      <i class="fa fa-search"></i>
+    </span>
+    <span class="popup-btn-close">
+      <i class="fa fa-times-circle"></i>
+    </span>
+    <div class="local-search-input-wrapper">
+      <input autocomplete="off"
+             placeholder="搜索..." spellcheck="false"
+             type="text" id="local-search-input">
+    </div>
+  </div>
+  <div id="local-search-result"></div>
+</div>
+
+
+
+    </div>
+  
+</nav>
+
+
+
+ </div>
+    </header>
+
+    <main id="main" class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          <div id="content" class="content">
+            
+
+  <div id="posts" class="posts-expand">
+    
+
+  
+
+  
+  
+  
+
+  <article class="post post-type-normal" itemscope itemtype="http://schema.org/Article">
+  
+  
+  
+  <div class="post-block">
+    <link itemprop="mainEntityOfPage" href="http://yc-sky.top/2026/11/23/always-on-agent-inbox-and-outbox/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="name" content="ycblue">
+      <meta itemprop="description" content="">
+      <meta itemprop="image" content="https://cdn.jsdelivr.net/gh/yc2hang/cdn-assets/avatar/avatar.jpg">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="Yc的博客">
+    </span>
+
+    
+      <header class="post-header">
+
+        
+        
+          <h1 class="post-title" itemprop="name headline">常驻 Agent 不是写个死循环：事件收件箱、单活唤醒与 Outbox 节流</h1>
+        
+      </header>
+    
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+<p>前面写过很多篇关于 Agent 循环、记忆和工具边界的笔记，默认前提其实都一样：用户在对话框里敲一句话，Agent 醒过来跑一个 <code>while</code> 循环，流式吐完答案，这轮活就算结束了。</p>
+<a id="more"></a>
+<p>可真把 Agent 用到日常工作流里，很快会想往前再迈一步：能不能别总等我催？比如仓库来了新 PR 自己看一眼、每天早上八点把昨天的变更汇总发我、发出去的邮件如果对方三天没回就自己跟进一下。</p>
+<p>这就是最近大家讨论很多的 Always-on Agent（或者叫 Proactive Agent，主动型 Agent）。Anthropic 在 11 月 13 日发了一篇工程指南《Building always-on agents》，LangChain 在 11 月 17 日也发了一篇复盘《What We've Learned Building Proactive Agents》。他们内部跑在 Managed Deep Agents 上的两个主力 Agent——做销售线索跟进的 GTM Agent 和做代码审阅的 Robin——现在超过 70% 的运行都来自定时触发，已经远远超过用户临时发消息的次数。</p>
+<p>我刚开始琢磨怎么自己搭一个类似的后台 Agent 时，第一反应很朴素：配几个 Webhook 接口，再挂几个 cron 定时任务，收到事件就直接调 <code>runAgent(event)</code>，干完活调 Slack 或邮件接口把结果推给用户，不就齐活了？</p>
+<p>把这两篇工程复盘读完，我才发现这么直连上线几乎必炸。</p>
+<h2 id="一直在线是用户的体感Agent-平时其实在睡觉"><a href="#一直在线是用户的体感Agent-平时其实在睡觉" class="headerlink" title="“一直在线”是用户的体感，Agent 平时其实在睡觉"></a>“一直在线”是用户的体感，Agent 平时其实在睡觉</h2>
+<p>Anthropic 在文章开头就泼了一盆很清醒的冷水：所谓 always-on，说的是用户的产品体验，在后端架构上它绝大部分时间都在睡觉。</p>
+<p>它真正的工作节奏是离散的：某个外部信号把它叫醒，它在会话里跑一次有明确边界的 <code>run</code>，读记忆、调工具、把新进展落盘，然后立刻回去继续睡。之所以今年这种模式突然变得划算，一方面是模型判断“什么时候该打扰人”的能力上来了，另一方面长程任务的单次成本掉得很快——Anthropic 在文里给了一个数据，在他们测的一个长程编程基准上，Opus 5.5 解决单个任务的成本比 Opus 5 降了 78%（常规负载下是降 40%）。</p>
+<p>既然底层跑的还是熟悉的 Agent 循环，那把一个“被动聊天机器人”改造成“后台常驻 Agent”，到底多出来了哪几层壳？</p>
+<p>Anthropic 把外围骨架拆成了五个原语：事件收件箱（Event Inbox）、定时器（Timers）、记忆（Memory）、权限（Permissions）和发件箱（Outbox）。记忆和人工审批挂起前几篇已经单独聊过，这一篇把重点放在最容易被忽视的“进、醒、出”闭环上：收件箱、定时器和发件箱是怎么咬合在一起的。</p>
+<h2 id="入口做成单行道所有触发源一律先写进-Event-Inbox"><a href="#入口做成单行道所有触发源一律先写进-Event-Inbox" class="headerlink" title="入口做成单行道：所有触发源一律先写进 Event Inbox"></a>入口做成单行道：所有触发源一律先写进 Event Inbox</h2>
+<p>为什么不能让 Webhook、定时器、用户消息各自直接去调 Agent？</p>
+<p>做前端的同学对竞态条件都很敏感。假如一个用户三秒内连发三条消息，或者 GitHub 连续推过来两个 Webhook 事件，各自直接启动一次 <code>runAgent()</code>，马上就会撞出三件事：两个并发 run 同时读写同一份记忆和会话状态，互相覆盖；模型对着同一件事重复干两遍、连发两条废话；要是进程跑一半重启，内存里正在处理的事件直接就丢了。</p>
+<p>解法很像服务端经典的持久化消息队列，Anthropic 叫它 Event Inbox，拆开看就三样东西：一张持久化的事件表、一个负责落库和快速响应的接入 Handler、一个后台消费的 Worker。</p>
+<p>这里有四条非常具体的工程约束：</p>
+<ol>
+<li><strong>接入层只落库、不干重活</strong>。Webhook 提供商对响应时间通常很苛刻，超时就会判定投递失败然后反复重试。Handler 拿到请求，做完最基础的鉴权和来源 ID 去重，写进 Inbox 表就立刻返回 200，再发一个信号唤醒 Worker。像 prompt injection 检测这种重操作，留给 Worker 跑起来之后再做。</li>
+<li><strong>定时器也别直接调 Agent，只负责往 Inbox 投事件</strong>。Anthropic 把 Timer 拆成两类：一类是 Agent 自己设的一次性跟进闹钟（follow-up，比如“明天上午检查这封邮件有没有回复”），另一类是固定周期的定时任务（schedule，比如每天发日报）。它们单独存一张表，由调度器按固定间隔扫描到期项：一次性的标成 <code>done</code>，周期性的把下次到期时间往后推，然后统一往 Inbox 里插一条事件唤醒 Worker。这样整个系统只有 Inbox 这一条唤醒入口。</li>
+<li><strong>同一个收件箱，同一时刻只允许一个活跃 Worker</strong>。通常按用户维度建收件箱。串行执行彻底消除了并发踩踏。如果当前 run 正在跑，半路又进来一条新事件，可以先留在 Inbox 里等下一轮，也可以按业务需要合并进当前轮，或者中断重跑。</li>
+<li><strong>Worker 醒来先打包合批，Inbox 是唯一真相源</strong>。Worker 被叫醒后，不会只盯刚来的那一条，它会把 Inbox 里所有 <code>pending</code> 状态的事件一次性捞出来，合并成一次 <code>run</code> 交给模型（用户连发三条消息，Agent 合并看完只回一条）。等 run 真正跑完，再把这批事件标成 <code>done</code>。万一 Worker 跑一半崩了，事件还在表里躺着，新 Worker 起来还能捞出来重试。</li>
+</ol>
+<h2 id="出口别写死必须回复留出静默通道再加一层-Outbox"><a href="#出口别写死必须回复留出静默通道再加一层-Outbox" class="headerlink" title="出口别写死“必须回复”：留出静默通道，再加一层 Outbox"></a>出口别写死“必须回复”：留出静默通道，再加一层 Outbox</h2>
+<p>把入口理顺之后，出口还有一个比入口更反直觉的转变。</p>
+<p>以前写聊天机器人，用户发一次请求，后端就流式吐一次回答，逻辑是一一对应的。放到 Always-on Agent 上，一次 run 结束其实有三种合法结局：往外发一条消息、决定什么都不发（保持静默）、或者遇到高风险操作走 deferred tool call 挂起等人工确认。</p>
+<p>其中“决定什么都不发”特别关键。如果每次醒来都非得给用户发一句汇报，后台 Agent 很快就会变成高频骚扰器。</p>
+<p>就算模型判断确实有事要通知用户，也不建议在所有场景里都让工具直接调 API 发出去。Anthropic 的做法是在模型和外部渠道之间再夹一层 Outbox（发件箱表 + 后台 Dispatcher）：模型只管往 Outbox 表里写待发消息，由 Dispatcher 统一管发送重试、合并节流和免打扰时段。</p>
+<h2 id="最小可运行原型用-TypeScript-串起收件箱-单活-Worker-发件箱"><a href="#最小可运行原型用-TypeScript-串起收件箱-单活-Worker-发件箱" class="headerlink" title="最小可运行原型：用 TypeScript 串起“收件箱 → 单活 Worker → 发件箱”"></a>最小可运行原型：用 TypeScript 串起“收件箱 → 单活 Worker → 发件箱”</h2>
+<p>下面是一段不依赖任何外部框架的 TypeScript 代码，把上面说的单活锁、来源去重、定时转事件、合批消费和 Outbox 节流压缩成了一个最小骨架：</p>
+<figure class="highlight typescript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br><span class="line">74</span><br><span class="line">75</span><br><span class="line">76</span><br><span class="line">77</span><br><span class="line">78</span><br><span class="line">79</span><br><span class="line">80</span><br><span class="line">81</span><br><span class="line">82</span><br><span class="line">83</span><br><span class="line">84</span><br><span class="line">85</span><br><span class="line">86</span><br><span class="line">87</span><br><span class="line">88</span><br><span class="line">89</span><br><span class="line">90</span><br><span class="line">91</span><br><span class="line">92</span><br><span class="line">93</span><br><span class="line">94</span><br><span class="line">95</span><br><span class="line">96</span><br><span class="line">97</span><br><span class="line">98</span><br><span class="line">99</span><br><span class="line">100</span><br><span class="line">101</span><br><span class="line">102</span><br><span class="line">103</span><br><span class="line">104</span><br><span class="line">105</span><br><span class="line">106</span><br><span class="line">107</span><br><span class="line">108</span><br><span class="line">109</span><br><span class="line">110</span><br><span class="line">111</span><br><span class="line">112</span><br><span class="line">113</span><br><span class="line">114</span><br><span class="line">115</span><br><span class="line">116</span><br><span class="line">117</span><br><span class="line">118</span><br><span class="line">119</span><br><span class="line">120</span><br><span class="line">121</span><br><span class="line">122</span><br></pre></td><td class="code"><pre><span class="line">type EventStatus = 'pending' | 'done';</span><br><span class="line"></span><br><span class="line">interface InboxEvent {</span><br><span class="line">  id: string;</span><br><span class="line">  sourceEventId: string; // 上游唯一 ID，用于 Webhook 重试去重</span><br><span class="line">  userId: string;</span><br><span class="line">  kind: 'user_message' | 'webhook' | 'timer';</span><br><span class="line">  payload: string;</span><br><span class="line">  status: EventStatus;</span><br><span class="line">}</span><br><span class="line"></span><br><span class="line">interface TimerJob {</span><br><span class="line">  id: string;</span><br><span class="line">  userId: string;</span><br><span class="line">  type: 'follow_up' | 'schedule';</span><br><span class="line">  dueAt: number;</span><br><span class="line">  intervalMs?: number;</span><br><span class="line">  payload: string;</span><br><span class="line">  done: boolean;</span><br><span class="line">}</span><br><span class="line"></span><br><span class="line">interface OutboxMessage {</span><br><span class="line">  id: string;</span><br><span class="line">  userId: string;</span><br><span class="line">  body: string;</span><br><span class="line">  urgent: boolean;</span><br><span class="line">  sent: boolean;</span><br><span class="line">}</span><br><span class="line"></span><br><span class="line">// 实际生产应换成数据库表；这里用数组演示状态流转</span><br><span class="line">const inbox: InboxEvent[] = [];</span><br><span class="line">const timers: TimerJob[] = [];</span><br><span class="line">const outbox: OutboxMessage[] = [];</span><br><span class="line">const activeWorkers = new Set&lt;string&gt;();</span><br><span class="line"></span><br><span class="line">// 1. 入口 Handler：去重 + 落库 + 立即返回，绝不在 HTTP 链路里等模型跑完</span><br><span class="line">export function enqueueEvent(input: Omit&lt;InboxEvent, 'id' | 'status'&gt;): boolean {</span><br><span class="line">  if (inbox.some((e) =&gt; e.userId === input.userId &amp;&amp; e.sourceEventId === input.sourceEventId)) {</span><br><span class="line">    return false; // 幂等吞掉上游重试</span><br><span class="line">  }</span><br><span class="line">  inbox.push({ ...input, id: crypto.randomUUID(), status: 'pending' });</span><br><span class="line">  void wakeWorker(input.userId);</span><br><span class="line">  return true;</span><br><span class="line">}</span><br><span class="line"></span><br><span class="line">// 2. 定时调度器：只把到期任务转投进 Inbox，不直接调用 Agent</span><br><span class="line">export function tickTimers(now = Date.now()): void {</span><br><span class="line">  for (const job of timers) {</span><br><span class="line">    if (job.done || job.dueAt &gt; now) continue;</span><br><span class="line">    const firedAt = job.dueAt;</span><br><span class="line">    if (job.type === 'follow_up') {</span><br><span class="line">      job.done = true;</span><br><span class="line">    } else if (job.intervalMs) {</span><br><span class="line">      job.dueAt = firedAt + job.intervalMs;</span><br><span class="line">    }</span><br><span class="line">    enqueueEvent({</span><br><span class="line">      userId: job.userId,</span><br><span class="line">      sourceEventId: `timer:${job.id}:${firedAt}`,</span><br><span class="line">      kind: 'timer',</span><br><span class="line">      payload: job.payload,</span><br><span class="line">    });</span><br><span class="line">  }</span><br><span class="line">}</span><br><span class="line"></span><br><span class="line">type AgentDecision =</span><br><span class="line">  | { action: 'silent' }</span><br><span class="line">  | { action: 'notify'; body: string; urgent?: boolean };</span><br><span class="line"></span><br><span class="line">// 3. 单活 Worker：同一用户串行消费，把积压事件合批进一次 run</span><br><span class="line">export async function wakeWorker(</span><br><span class="line">  userId: string,</span><br><span class="line">  runAgent: (events: InboxEvent[]) =&gt; Promise&lt;AgentDecision&gt; = defaultRunAgent,</span><br><span class="line">): Promise&lt;void&gt; {</span><br><span class="line">  if (activeWorkers.has(userId)) return; // 已有活跃 Worker，新事件留在表里等下一轮</span><br><span class="line">  activeWorkers.add(userId);</span><br><span class="line"></span><br><span class="line">  try {</span><br><span class="line">    while (true) {</span><br><span class="line">      const batch = inbox.filter((e) =&gt; e.userId === userId &amp;&amp; e.status === 'pending');</span><br><span class="line">      if (batch.length === 0) break;</span><br><span class="line"></span><br><span class="line">      const decision = await runAgent(batch);</span><br><span class="line">      if (decision.action === 'notify') {</span><br><span class="line">        outbox.push({</span><br><span class="line">          id: crypto.randomUUID(),</span><br><span class="line">          userId,</span><br><span class="line">          body: decision.body,</span><br><span class="line">          urgent: Boolean(decision.urgent),</span><br><span class="line">          sent: false,</span><br><span class="line">        });</span><br><span class="line">      }</span><br><span class="line"></span><br><span class="line">      // 跑完再统一标 done；如果中途抛错，事件保持 pending，后续可重试</span><br><span class="line">      for (const ev of batch) ev.status = 'done';</span><br><span class="line">    }</span><br><span class="line">  } finally {</span><br><span class="line">    activeWorkers.delete(userId);</span><br><span class="line">  }</span><br><span class="line">}</span><br><span class="line"></span><br><span class="line">// 4. Outbox 分发器：控制发送节奏，比如夜间静默期只放行紧急消息</span><br><span class="line">export async function dispatchOutbox(</span><br><span class="line">  isQuietHours: boolean,</span><br><span class="line">  send: (msg: OutboxMessage) =&gt; Promise&lt;void&gt;,</span><br><span class="line">): Promise&lt;void&gt; {</span><br><span class="line">  for (const msg of outbox) {</span><br><span class="line">    if (msg.sent) continue;</span><br><span class="line">    if (isQuietHours &amp;&amp; !msg.urgent) continue;</span><br><span class="line">    await send(msg);</span><br><span class="line">    msg.sent = true;</span><br><span class="line">  }</span><br><span class="line">}</span><br><span class="line"></span><br><span class="line">async function defaultRunAgent(events: InboxEvent[]): Promise&lt;AgentDecision&gt; {</span><br><span class="line">  const hasImportant = events.some((e) =&gt; e.payload.includes('urgent'));</span><br><span class="line">  if (!hasImportant) return { action: 'silent' };</span><br><span class="line">  return {</span><br><span class="line">    action: 'notify',</span><br><span class="line">    body: `汇总处理了 ${events.length} 条事件，发现需要关注的告警。`,</span><br><span class="line">    urgent: true,</span><br><span class="line">  };</span><br><span class="line">}</span><br></pre></td></tr></table></figure>
+<p>写前端的同学看 <code>wakeWorker</code> 里的那层 <code>activeWorkers</code> 锁加 <code>while (true)</code> 应该很眼熟：它和 UI 里防止重复触发异步任务、把期间攒下的更新合并到下一次执行的模式几乎一模一样。唯一的关键差别在于，生产环境里这三张表必须落在持久存储（比如 Postgres）里，靠数据库行锁或分布式锁保住“单活”，别放在 Node 进程内存里。</p>
+<h2 id="落地时最容易踩的两个坑"><a href="#落地时最容易踩的两个坑" class="headerlink" title="落地时最容易踩的两个坑"></a>落地时最容易踩的两个坑</h2>
+<p>这套收发队列搭起来不算复杂，但结合两家团队公开的实战教训，真正线上跑起来有两个坑最容易把体验搞砸。</p>
+<h3 id="坑一把事件到达当成必须插话把用户烦到直接静音"><a href="#坑一把事件到达当成必须插话把用户烦到直接静音" class="headerlink" title="坑一：把“事件到达”当成“必须插话”，把用户烦到直接静音"></a>坑一：把“事件到达”当成“必须插话”，把用户烦到直接静音</h3>
+<p>习惯了做一问一答的聊天产品，很容易把后台 Agent 也做成“有动静就汇报”。</p>
+<p>LangChain 在复盘里说得很直白：当 Agent 开始接管跨天、跨周的目标时，真正的稀缺瓶颈很快就变成了用户的注意力——人脑一样有有限的上下文窗口。他们给内部的 GTM Agent 做了专门的审阅列表，直接把会话分成“等你处理”“需要草拟回复”“无需回复”三档，过滤掉低价值邮件；给工程 Agent Robin 接进 Slack 频道时，他们没让它听见动静就回复，专门加了一个决策模型，判断眼下同事讨论的对话里它到底有没有价值插嘴。</p>
+<p>哪怕真的决定发消息，展示方式也得为“快速扫一眼”让路。Robin 发通知的习惯是先抛一两句标题说清楚结论，把细节全塞进 thread 回复里；开 PR 请求 review 时，消息里只放一行摘要、改动规模和一个认领按钮。Anthropic 给的实践建议也完全一致：宁可一开始把主动型 Agent 调得安静一点，靠评测校准触发频率，等建立起信任再慢慢提高它的发言权限。</p>
+<h3 id="坑二在重试与并发之间漏掉幂等或者在回调里直接等模型"><a href="#坑二在重试与并发之间漏掉幂等或者在回调里直接等模型" class="headerlink" title="坑二：在重试与并发之间漏掉幂等，或者在回调里直接等模型"></a>坑二：在重试与并发之间漏掉幂等，或者在回调里直接等模型</h3>
+<p>前端写久了 HTTP 接口，习惯在请求处理器里把整个业务 <code>await</code> 完再返回响应。把这个习惯带到 Always-on Agent 的 Webhook 入口上，几乎一定会撞墙。</p>
+<p>一次 Agent 的 run 动辄十几秒甚至一两分钟，上游 Webhook（比如邮件网关或 Git 平台）等个几秒没拿到 200 就断开重发。如果接入层没把“落库 ACK”和“后台消费”拆开，也没用上游唯一 ID 在 Inbox 里做幂等去重，一次事件很快就会裂变成三四次并发执行。</p>
+<p>另一个连带问题出在“标记完成”的时机上。如果 Worker 刚捞出事件就顺手把状态改成 <code>done</code>，结果模型调用半路超时或者容器被回收，这条事件就彻底人间蒸发了；反过来，一定要把标 <code>done</code> 放在 run 正常落盘之后，并且配合 <code>sourceEventId</code> 和发件箱幂等键，才能在进程意外退出后安全恢复。</p>
+<h2 id="小结"><a href="#小结" class="headerlink" title="小结"></a>小结</h2>
+<p>从“用户发一句、模型回一句”走到“后台持续跑的 Always-on Agent”，核心变化不在模型循环里面，而在循环外面的收发边界：</p>
+<ul>
+<li>入口统一收口到持久化的 Event Inbox，Webhook 快速落库去重返回，Timer 到期后也只往 Inbox 写事件；</li>
+<li>同一个收件箱保持单活 Worker 串行消费，顺手把短时间内攒下的待处理事件合批进一次 run；</li>
+<li>出口显式允许“静默结束”，需要主动触达用户的消息走 Outbox 管节流与重试，把用户的注意力当成和 token 一样贵的资源来省着用。</li>
+</ul>
+<p>参考：</p>
+<ul>
+<li><a href="https://claude.com/resources/articles/building-always-on-agents" target="_blank" rel="noopener">Building always-on agents（Anthropic / Claude Resources, 2026-11-13）</a></li>
+<li><a href="https://www.langchain.com/blog/what-weve-learned-building-proactive-agents" target="_blank" rel="noopener">What We've Learned Building Proactive Agents（LangChain Blog, 2026-11-17）</a></li>
+</ul>
+    </div>
+
+    <footer class="post-footer">
+        <div class="post-tags">
+          <a href="/agent/" rel="tag"># Agent</a>
+          <a href="/agent/" rel="tag"># Always-on Agent</a>
+          <a href="/agent/" rel="tag"># 架构设计</a>
+        </div>
+        <div class="post-nav">
+          <div class="post-nav-next post-nav-item">
+              <a href="/2026/11/20/agent-memory-and-dreaming/" rel="next" title="Agent 跨会话记忆怎么管：别只靠“随手记笔记”，还得靠离线“做梦”纠错">
+                <i class="fa fa-chevron-left"></i> Agent 跨会话记忆怎么管：别只靠“随手记笔记”，还得靠离线“做梦”纠错
+              </a>
+          </div>
+          <span class="post-nav-divider"></span>
+          <div class="post-nav-prev post-nav-item">
+              
+          </div>
+        </div>
+    </footer>
+  </div>
+  
+  
+  
+  </article>
+
+
+
+    <div class="post-spread">
+      
+    </div>
+  </div>
+
+
+          </div>
+          
+
+
+          
+
+  
+
+
+
+        </div>
+        
+          
+  
+  <div class="sidebar-toggle">
+    <div class="sidebar-toggle-line-wrap">
+      <span class="sidebar-toggle-line sidebar-toggle-line-first"></span>
+      <span class="sidebar-toggle-line sidebar-toggle-line-middle"></span>
+      <span class="sidebar-toggle-line sidebar-toggle-line-last"></span>
+    </div>
+  </div>
+
+  <aside id="sidebar" class="sidebar">
+    
+    <div class="sidebar-inner">
+
+      
+
+      
+        <ul class="sidebar-nav motion-element">
+          <li class="sidebar-nav-toc sidebar-nav-active" data-target="post-toc-wrap">
+            文章目录
+          </li>
+          <li class="sidebar-nav-overview" data-target="site-overview-wrap">
+            站点概览
+          </li>
+        </ul>
+      
+
+      <section class="site-overview-wrap sidebar-panel">
+        <div class="site-overview">
+          <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+            
+              <img class="site-author-image" itemprop="image"
+                src="https://cdn.jsdelivr.net/gh/yc2hang/cdn-assets/avatar/avatar.jpg"
+                alt="ycblue" />
+            
+              <p class="site-author-name" itemprop="name">ycblue</p>
+              <p class="site-description motion-element" itemprop="description">stay hungry, stay foolish</p>
+          </div>
+
+          <nav class="site-state motion-element">
+
+            
+              <div class="site-state-item site-state-posts">
+              
+                <a href="/archives/%7C%7Carchive">
+              
+                  <span class="site-state-item-count">30</span>
+                  <span class="site-state-item-name">日志</span>
+                </a>
+              </div>
+            
+
+            
+              
+              
+              <div class="site-state-item site-state-categories">
+                <a href="/categories/index.html">
+                  <span class="site-state-item-count">3</span>
+                  <span class="site-state-item-name">分类</span>
+                </a>
+              </div>
+            
+
+            
+              
+              
+              <div class="site-state-item site-state-tags">
+                <a href="/tags/index.html">
+                  <span class="site-state-item-count">14</span>
+                  <span class="site-state-item-name">标签</span>
+                </a>
+              </div>
+            
+
+          </nav>
+
+          
+
+          
+            <div class="links-of-author motion-element">
+                
+                  <span class="links-of-author-item">
+                    <a href="https://github.com/yc2hang" target="_blank" title="GitHub">
+                      
+                        <i class="fa fa-fw fa-github"></i>GitHub</a>
+                  </span>
+                
+                  <span class="links-of-author-item">
+                    <a href="mailto:yc2hangycz@gmail.com" target="_blank" title="E-Mail">
+                      
+                        <i class="fa fa-fw fa-envelope"></i>E-Mail</a>
+                  </span>
+                
+            </div>
+          
+
+          
+          
+
+          
+          
+
+          
+
+        </div>
+      </section>
+
+      
+      <!--noindex-->
+        <section class="post-toc-wrap motion-element sidebar-panel sidebar-panel-active">
+          <div class="post-toc">
+
+            
+              
+            
+
+            
+              <div class="post-toc-content"><ol class="nav"><li class="nav-item nav-level-2"><a class="nav-link" href="#一直在线是用户的体感Agent-平时其实在睡觉"><span class="nav-number">1.</span> <span class="nav-text">“一直在线”是用户的体感，Agent 平时其实在睡觉</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#入口做成单行道所有触发源一律先写进-Event-Inbox"><span class="nav-number">2.</span> <span class="nav-text">入口做成单行道：所有触发源一律先写进 Event Inbox</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#出口别写死必须回复留出静默通道再加一层-Outbox"><span class="nav-number">3.</span> <span class="nav-text">出口别写死“必须回复”：留出静默通道，再加一层 Outbox</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#最小可运行原型用-TypeScript-串起收件箱-单活-Worker-发件箱"><span class="nav-number">4.</span> <span class="nav-text">最小可运行原型：用 TypeScript 串起“收件箱 → 单活 Worker → 发件箱”</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#落地时最容易踩的两个坑"><span class="nav-number">5.</span> <span class="nav-text">落地时最容易踩的两个坑</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#坑一把事件到达当成必须插话把用户烦到直接静音"><span class="nav-number">5.1.</span> <span class="nav-text">坑一：把“事件到达”当成“必须插话”，把用户烦到直接静音</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#坑二在重试与并发之间漏掉幂等或者在回调里直接等模型"><span class="nav-number">5.2.</span> <span class="nav-text">坑二：在重试与并发之间漏掉幂等，或者在回调里直接等模型</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#小结"><span class="nav-number">6.</span> <span class="nav-text">小结</span></a></li></ol></div>
+            
+
+          </div>
+        </section>
+      <!--/noindex-->
+      
+
+      
+
+    </div>
+  </aside>
+
+
+        
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="footer-inner">
+        <div class="copyright">&copy; <span itemprop="copyrightYear">2025</span>
+  <span class="with-love">
+    <i class="fa fa-heart"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">ycblue</span>
+
+  
+</div>
+
+
+  <div class="powered-by">由 <a class="theme-link" target="_blank" href="https://hexo.io">Hexo</a> 强力驱动</div>
+
+
+
+  <span class="post-meta-divider">|</span>
+
+
+
+  <div class="theme-info">主题 &mdash; <a class="theme-link" target="_blank" href="https://github.com/iissnan/hexo-theme-next">NexT.Mist</a> v5.1.4</div>
+
+
+
+
+        
+
+
+
+
+
+
+
+        
+      </div>
+    </footer>
+
+    
+      <div class="back-to-top">
+        <i class="fa fa-arrow-up"></i>
+        
+      </div>
+    
+
+    
+
+  </div>
+
+  
+
+<script type="text/javascript">
+  if (Object.prototype.toString.call(window.Promise) !== '[object Function]') {
+    window.Promise = null;
+  }
+</script>
+
+
+
+
+
+
+
+
+
+  
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+  
+  
+    <script type="text/javascript" src="/lib/jquery/index.js?v=2.1.3"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/fastclick/lib/fastclick.min.js?v=1.0.6"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/jquery_lazyload/jquery.lazyload.js?v=1.9.7"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/velocity/velocity.min.js?v=1.2.1"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/velocity/velocity.ui.min.js?v=1.2.1"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/fancybox/source/jquery.fancybox.pack.js?v=2.1.5"></script>
+  
+
+  
+  
+    <script type="text/javascript" src="/lib/canvas-nest/canvas-nest.min.js"></script>
+  
+
+
+  
+
+
+  <script type="text/javascript" src="/js/src/utils.js?v=5.1.4"></script>
+
+  <script type="text/javascript" src="/js/src/motion.js?v=5.1.4"></script>
+
+
+
+  
+  
+
+  
+  <script type="text/javascript" src="/js/src/scrollspy.js?v=5.1.4"></script>
+<script type="text/javascript" src="/js/src/post-details.js?v=5.1.4"></script>
+
+
+
+  
+
+
+  <script type="text/javascript" src="/js/src/bootstrap.js?v=5.1.4"></script>
+
+
+
+  
+
+
+  
+
+
+
+
+	
+
+
+
+
+
+  
+
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  <script type="text/javascript">
+    // Popup Window;
+    var isfetched = false;
+    var isXml = true;
+    // Search DB path;
+    var search_path = "search.xml";
+    if (search_path.length === 0) {
+      search_path = "search.xml";
+    } else if (/json$/i.test(search_path)) {
+      isXml = false;
+    }
+    var path = "/" + search_path;
+    // monitor main search box;
+
+    var onPopupClose = function (e) {
+      $('.popup').hide();
+      $('#local-search-input').val('');
+      $('.search-result-list').remove();
+      $('#no-result').remove();
+      $(".local-search-pop-overlay").remove();
+      $('body').css('overflow', '');
+    }
+
+    function proceedsearch() {
+      $("body")
+        .append('<div class="search-popup-overlay local-search-pop-overlay"></div>')
+        .css('overflow', 'hidden');
+      $('.search-popup-overlay').click(onPopupClose);
+      $('.popup').toggle();
+      var $localSearchInput = $('#local-search-input');
+      $localSearchInput.attr("autocapitalize", "none");
+      $localSearchInput.attr("autocorrect", "off");
+      $localSearchInput.focus();
+    }
+
+    // search function;
+    var searchFunc = function(path, search_id, content_id) {
+      'use strict';
+
+      // start loading animation
+      $("body")
+        .append('<div class="search-popup-overlay local-search-pop-overlay">' +
+          '<div id="search-loading-icon">' +
+          '<i class="fa fa-spinner fa-pulse fa-5x fa-fw"></i>' +
+          '</div>' +
+          '</div>')
+        .css('overflow', 'hidden');
+      $("#search-loading-icon").css('margin', '20% auto 0 auto').css('text-align', 'center');
+
+      $.ajax({
+        url: path,
+        dataType: isXml ? "xml" : "json",
+        async: true,
+        success: function(res) {
+          // get the contents from search data
+          isfetched = true;
+          $('.popup').detach().appendTo('.header-inner');
+          var datas = isXml ? $("entry", res).map(function() {
+            return {
+              title: $("title", this).text(),
+              content: $("content",this).text(),
+              url: $("url" , this).text()
+            };
+          }).get() : res;
+          var input = document.getElementById(search_id);
+          var resultContent = document.getElementById(content_id);
+          var inputEventFunction = function() {
+            var searchText = input.value.trim().toLowerCase();
+            var keywords = searchText.split(/[\s\-]+/);
+            if (keywords.length > 1) {
+              keywords.push(searchText);
+            }
+            var resultItems = [];
+            if (searchText.length > 0) {
+              // perform local searching
+              datas.forEach(function(data) {
+                var isMatch = false;
+                var hitCount = 0;
+                var searchTextCount = 0;
+                var title = data.title.trim();
+                var titleInLowerCase = title.toLowerCase();
+                var content = data.content.trim().replace(/<[^>]+>/g,"");
+                var contentInLowerCase = content.toLowerCase();
+                var articleUrl = decodeURIComponent(data.url);
+                var indexOfTitle = [];
+                var indexOfContent = [];
+                // only match articles with not empty titles
+                if(title != '') {
+                  keywords.forEach(function(keyword) {
+                    function getIndexByWord(word, text, caseSensitive) {
+                      var wordLen = word.length;
+                      if (wordLen === 0) {
+                        return [];
+                      }
+                      var startPosition = 0, position = [], index = [];
+                      if (!caseSensitive) {
+                        text = text.toLowerCase();
+                        word = word.toLowerCase();
+                      }
+                      while ((position = text.indexOf(word, startPosition)) > -1) {
+                        index.push({position: position, word: word});
+                        startPosition = position + wordLen;
+                      }
+                      return index;
+                    }
+
+                    indexOfTitle = indexOfTitle.concat(getIndexByWord(keyword, titleInLowerCase, false));
+                    indexOfContent = indexOfContent.concat(getIndexByWord(keyword, contentInLowerCase, false));
+                  });
+                  if (indexOfTitle.length > 0 || indexOfContent.length > 0) {
+                    isMatch = true;
+                    hitCount = indexOfTitle.length + indexOfContent.length;
+                  }
+                }
+
+                // show search results
+
+                if (isMatch) {
+                  // sort index by position of keyword
+
+                  [indexOfTitle, indexOfContent].forEach(function (index) {
+                    index.sort(function (itemLeft, itemRight) {
+                      if (itemRight.position !== itemLeft.position) {
+                        return itemRight.position - itemLeft.position;
+                      } else {
+                        return itemLeft.word.length - itemRight.word.length;
+                      }
+                    });
+                  });
+
+                  // merge hits into slices
+
+                  function mergeIntoSlice(text, start, end, index) {
+                    var item = index[index.length - 1];
+                    var position = item.position;
+                    var word = item.word;
+                    var hits = [];
+                    var searchTextCountInSlice = 0;
+                    while (position + word.length <= end && index.length != 0) {
+                      if (word === searchText) {
+                        searchTextCountInSlice++;
+                      }
+                      hits.push({position: position, length: word.length});
+                      var wordEnd = position + word.length;
+
+                      // move to next position of hit
+
+                      index.pop();
+                      while (index.length != 0) {
+                        item = index[index.length - 1];
+                        position = item.position;
+                        word = item.word;
+                        if (wordEnd > position) {
+                          index.pop();
+                        } else {
+                          break;
+                        }
+                      }
+                    }
+                    searchTextCount += searchTextCountInSlice;
+                    return {
+                      hits: hits,
+                      start: start,
+                      end: end,
+                      searchTextCount: searchTextCountInSlice
+                    };
+                  }
+
+                  var slicesOfTitle = [];
+                  if (indexOfTitle.length != 0) {
+                    slicesOfTitle.push(mergeIntoSlice(title, 0, title.length, indexOfTitle));
+                  }
+
+                  var slicesOfContent = [];
+                  while (indexOfContent.length != 0) {
+                    var item = indexOfContent[indexOfContent.length - 1];
+                    var position = item.position;
+                    var word = item.word;
+                    // cut out 100 characters
+                    var start = position - 20;
+                    var end = position + 80;
+                    if(start < 0){
+                      start = 0;
+                    }
+                    if (end < position + word.length) {
+                      end = position + word.length;
+                    }
+                    if(end > content.length){
+                      end = content.length;
+                    }
+                    slicesOfContent.push(mergeIntoSlice(content, start, end, indexOfContent));
+                  }
+
+                  // sort slices in content by search text's count and hits' count
+
+                  slicesOfContent.sort(function (sliceLeft, sliceRight) {
+                    if (sliceLeft.searchTextCount !== sliceRight.searchTextCount) {
+                      return sliceRight.searchTextCount - sliceLeft.searchTextCount;
+                    } else if (sliceLeft.hits.length !== sliceRight.hits.length) {
+                      return sliceRight.hits.length - sliceLeft.hits.length;
+                    } else {
+                      return sliceLeft.start - sliceRight.start;
+                    }
+                  });
+
+                  // select top N slices in content
+
+                  var upperBound = parseInt('1');
+                  if (upperBound >= 0) {
+                    slicesOfContent = slicesOfContent.slice(0, upperBound);
+                  }
+
+                  // highlight title and content
+
+                  function highlightKeyword(text, slice) {
+                    var result = '';
+                    var prevEnd = slice.start;
+                    slice.hits.forEach(function (hit) {
+                      result += text.substring(prevEnd, hit.position);
+                      var end = hit.position + hit.length;
+                      result += '<b class="search-keyword">' + text.substring(hit.position, end) + '</b>';
+                      prevEnd = end;
+                    });
+                    result += text.substring(prevEnd, slice.end);
+                    return result;
+                  }
+
+                  var resultItem = '';
+
+                  if (slicesOfTitle.length != 0) {
+                    resultItem += "<li><a href='" + articleUrl + "' class='search-result-title'>" + highlightKeyword(title, slicesOfTitle[0]) + "</a>";
+                  } else {
+                    resultItem += "<li><a href='" + articleUrl + "' class='search-result-title'>" + title + "</a>";
+                  }
+
+                  slicesOfContent.forEach(function (slice) {
+                    resultItem += "<a href='" + articleUrl + "'>" +
+                      "<p class=\"search-result\">" + highlightKeyword(content, slice) +
+                      "...</p>" + "</a>";
+                  });
+
+                  resultItem += "</li>";
+                  resultItems.push({
+                    item: resultItem,
+                    searchTextCount: searchTextCount,
+                    hitCount: hitCount,
+                    id: resultItems.length
+                  });
+                }
+              })
+            };
+            if (keywords.length === 1 && keywords[0] === "") {
+              resultContent.innerHTML = '<div id="no-result"><i class="fa fa-search fa-5x" /></div>'
+            } else if (resultItems.length === 0) {
+              resultContent.innerHTML = '<div id="no-result"><i class="fa fa-frown-o fa-5x" /></div>'
+            } else {
+              resultItems.sort(function (resultLeft, resultRight) {
+                if (resultLeft.searchTextCount !== resultRight.searchTextCount) {
+                  return resultRight.searchTextCount - resultLeft.searchTextCount;
+                } else if (resultLeft.hitCount !== resultRight.hitCount) {
+                  return resultRight.hitCount - resultLeft.hitCount;
+                } else {
+                  return resultRight.id - resultLeft.id;
+                }
+              });
+              var searchResultList = '<ul class=\"search-result-list\">';
+              resultItems.forEach(function (result) {
+                searchResultList += result.item;
+              })
+              searchResultList += "</ul>";
+              resultContent.innerHTML = searchResultList;
+            }
+          }
+
+          if ('auto' === 'auto') {
+            input.addEventListener('input', inputEventFunction);
+          } else {
+            $('.search-icon').click(inputEventFunction);
+            input.addEventListener('keypress', function (event) {
+              if (event.keyCode === 13) {
+                inputEventFunction();
+              }
+            });
+          }
+
+          // remove loading animation
+          $(".local-search-pop-overlay").remove();
+          $('body').css('overflow', '');
+
+          proceedsearch();
+        }
+      });
+    }
+
+    // handle and trigger popup window;
+    $('.popup-trigger').click(function(e) {
+      e.stopPropagation();
+      if (isfetched === false) {
+        searchFunc(path, 'local-search-input', 'local-search-result');
+      } else {
+        proceedsearch();
+      };
+    });
+
+    $('.popup-btn-close').click(onPopupClose);
+    $('.popup').click(function(e){
+      e.stopPropagation();
+    });
+    $(document).on('keyup', function (event) {
+      var shouldDismissSearchPopup = event.which === 27 &&
+        $('.search-popup').is(':visible');
+      if (shouldDismissSearchPopup) {
+        onPopupClose();
+      }
+    });
+  </script>
+
+
+
+
+
+  
+
+  
+
+  
+
+  
+  
+
+  
+
+  
+
+  
+
+</body>
+</html>
