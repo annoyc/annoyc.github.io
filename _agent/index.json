@@ -1,5 +1,16 @@
 [
   {
+    "title": "子 Agent 别把主循环卡死：异步任务、半路改需求与三态回传",
+    "date": "2026-11-24",
+    "url": "/2026/11/24/async-subagents-non-blocking-loop/",
+    "tags": [
+      "Agent",
+      "Subagents",
+      "架构设计"
+    ],
+    "file": "2026-11-24-async-subagents-non-blocking-loop.md"
+  },
+  {
     "title": "常驻 Agent 不是写个死循环：事件收件箱、单活唤醒与 Outbox 节流",
     "date": "2026-11-23",
     "url": "/2026/11/23/always-on-agent-inbox-and-outbox/",

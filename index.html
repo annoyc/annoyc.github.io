@@ -270,6 +270,37 @@
 <!--agent-daily:start-->
   <article class="post post-type-normal" itemscope itemtype="http://schema.org/Article">
   <div class="post-block">
+    <link itemprop="mainEntityOfPage" href="http://yc-sky.top/2026/11/24/async-subagents-non-blocking-loop/">
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="Yc的博客">
+    </span>
+      <header class="post-header">
+          <h1 class="post-title" itemprop="name headline">
+                <a class="post-title-link" href="/2026/11/24/async-subagents-non-blocking-loop/" itemprop="url">子 Agent 别把主循环卡死：异步任务、半路改需求与三态回传</a></h1>
+          <div class="post-meta">
+            <span class="post-time">
+              <span class="post-meta-item-icon"><i class="fa fa-calendar-o"></i></span>
+              <time title="发表于" itemprop="dateCreated datePublished" datetime="2026-11-24T16:00:00+08:00">2026-11-24</time>
+            </span>
+          </div>
+      </header>
+    <div class="post-body" itemprop="articleBody">
+          <p>传统 Agent 调一个慢工具或同步子 Agent，整个主循环就会卡在 await 上，用户既插不上话也改不了需求。拆解 LangChain Deep Agents、Claude Code 和 OpenAI 最近落地的异步子 Agent 与异步工具机制：主从分离、五件控制工具、interrupt 与 enqueue 纠偏，以及主循环三态下的结果回传。</p>
+          <!--noindex-->
+          <div class="post-button text-center">
+            <a class="btn" href="/2026/11/24/async-subagents-non-blocking-loop/#more" rel="contents">
+              阅读全文 &raquo;
+            </a>
+          </div>
+          <!--/noindex-->
+    </div>
+    <footer class="post-footer">
+        <div class="post-eof"></div>
+    </footer>
+  </div>
+  </article>
+  <article class="post post-type-normal" itemscope itemtype="http://schema.org/Article">
+  <div class="post-block">
     <link itemprop="mainEntityOfPage" href="http://yc-sky.top/2026/11/23/always-on-agent-inbox-and-outbox/">
     <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
       <meta itemprop="name" content="Yc的博客">
@@ -382,37 +413,6 @@
           <!--noindex-->
           <div class="post-button text-center">
             <a class="btn" href="/2026/11/17/stream-first-event-retry-and-timeouts/#more" rel="contents">
-              阅读全文 &raquo;
-            </a>
-          </div>
-          <!--/noindex-->
-    </div>
-    <footer class="post-footer">
-        <div class="post-eof"></div>
-    </footer>
-  </div>
-  </article>
-  <article class="post post-type-normal" itemscope itemtype="http://schema.org/Article">
-  <div class="post-block">
-    <link itemprop="mainEntityOfPage" href="http://yc-sky.top/2026/11/17/intent-router-needs-filter/">
-    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
-      <meta itemprop="name" content="Yc的博客">
-    </span>
-      <header class="post-header">
-          <h1 class="post-title" itemprop="name headline">
-                <a class="post-title-link" href="/2026/11/17/intent-router-needs-filter/" itemprop="url">意图路由别只给模型打个标签：简单问题要短路，模糊问题缺的是参数</a></h1>
-          <div class="post-meta">
-            <span class="post-time">
-              <span class="post-meta-item-icon"><i class="fa fa-calendar-o"></i></span>
-              <time title="发表于" itemprop="dateCreated datePublished" datetime="2026-11-17T16:00:00+08:00">2026-11-17</time>
-            </span>
-          </div>
-      </header>
-    <div class="post-body" itemprop="articleBody">
-          <p>做自然语言查数据库时，把问题直连 Agent 循环会遇到两头堵：遇到“库里有哪些表”容易过度行动去写 SQL，遇到“看下最近订单”模型又自作主张编造时间范围。这篇讲为什么意图路由不能只输出分类枚举，以及我在数问工作台里怎么用正则短路、连续置信度门禁和软提示注入来控制 Agent 的行为边界。</p>
-          <!--noindex-->
-          <div class="post-button text-center">
-            <a class="btn" href="/2026/11/17/intent-router-needs-filter/#more" rel="contents">
               阅读全文 &raquo;
             </a>
           </div>
