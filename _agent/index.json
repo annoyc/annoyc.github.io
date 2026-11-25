@@ -1,5 +1,17 @@
 [
   {
+    "title": "Agent 的上下文占用指示器，别把计费 Token 累加当成窗口用量",
+    "date": "2026-11-25",
+    "url": "/2026/11/25/context-window-usage-not-billed-tokens/",
+    "tags": [
+      "Agent",
+      "Context Engineering",
+      "多模型适配",
+      "数问工作台"
+    ],
+    "file": "2026-11-25-context-window-usage-not-billed-tokens.md"
+  },
+  {
     "title": "子 Agent 别把主循环卡死：异步任务、半路改需求与三态回传",
     "date": "2026-11-24",
     "url": "/2026/11/24/async-subagents-non-blocking-loop/",
