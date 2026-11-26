@@ -1,5 +1,16 @@
 [
   {
+    "title": "MCP 接了多个 Server，为什么不能把工具名当成身份凭证",
+    "date": "2026-11-26",
+    "url": "/2026/11/26/mcp-tool-names-are-not-identities/",
+    "tags": [
+      "Agent",
+      "MCP",
+      "工具安全"
+    ],
+    "file": "2026-11-26-mcp-tool-names-are-not-identities.md"
+  },
+  {
     "title": "Agent 的上下文占用指示器，别把计费 Token 累加当成窗口用量",
     "date": "2026-11-25",
     "url": "/2026/11/25/context-window-usage-not-billed-tokens/",

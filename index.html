@@ -270,6 +270,37 @@
 <!--agent-daily:start-->
   <article class="post post-type-normal" itemscope itemtype="http://schema.org/Article">
   <div class="post-block">
+    <link itemprop="mainEntityOfPage" href="http://yc-sky.top/2026/11/26/mcp-tool-names-are-not-identities/">
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="Yc的博客">
+    </span>
+      <header class="post-header">
+          <h1 class="post-title" itemprop="name headline">
+                <a class="post-title-link" href="/2026/11/26/mcp-tool-names-are-not-identities/" itemprop="url">MCP 接了多个 Server，为什么不能把工具名当成身份凭证</a></h1>
+          <div class="post-meta">
+            <span class="post-time">
+              <span class="post-meta-item-icon"><i class="fa fa-calendar-o"></i></span>
+              <time title="发表于" itemprop="dateCreated datePublished" datetime="2026-11-26T16:00:00+08:00">2026-11-26</time>
+            </span>
+          </div>
+      </header>
+    <div class="post-body" itemprop="articleBody">
+          <p>挂了多个 MCP Server 时，模型把原本该给内部服务的请求调到了第三方工具上，攻击者甚至不需要入侵任何服务器。结合最新实测论文和 MCP 官方规范，拆解多 Server 下的工具提供方错绑（Tool-Provider Misbinding），以及在 TypeScript 客户端里怎么做提供方绑定与清单校验。</p>
+          <!--noindex-->
+          <div class="post-button text-center">
+            <a class="btn" href="/2026/11/26/mcp-tool-names-are-not-identities/#more" rel="contents">
+              阅读全文 &raquo;
+            </a>
+          </div>
+          <!--/noindex-->
+    </div>
+    <footer class="post-footer">
+        <div class="post-eof"></div>
+    </footer>
+  </div>
+  </article>
+  <article class="post post-type-normal" itemscope itemtype="http://schema.org/Article">
+  <div class="post-block">
     <link itemprop="mainEntityOfPage" href="http://yc-sky.top/2026/11/25/context-window-usage-not-billed-tokens/">
     <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
       <meta itemprop="name" content="Yc的博客">
@@ -382,37 +413,6 @@
           <!--noindex-->
           <div class="post-button text-center">
             <a class="btn" href="/2026/11/20/agent-memory-and-dreaming/#more" rel="contents">
-              阅读全文 &raquo;
-            </a>
-          </div>
-          <!--/noindex-->
-    </div>
-    <footer class="post-footer">
-        <div class="post-eof"></div>
-    </footer>
-  </div>
-  </article>
-  <article class="post post-type-normal" itemscope itemtype="http://schema.org/Article">
-  <div class="post-block">
-    <link itemprop="mainEntityOfPage" href="http://yc-sky.top/2026/11/19/telemetry-default-no-content-and-safe-errors/">
-    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
-      <meta itemprop="name" content="Yc的博客">
-    </span>
-      <header class="post-header">
-          <h1 class="post-title" itemprop="name headline">
-                <a class="post-title-link" href="/2026/11/19/telemetry-default-no-content-and-safe-errors/" itemprop="url">Agent 接入可观测性，别一上来就把 Prompt 和报错原文全传上去</a></h1>
-          <div class="post-meta">
-            <span class="post-time">
-              <span class="post-meta-item-icon"><i class="fa fa-calendar-o"></i></span>
-              <time title="发表于" itemprop="dateCreated datePublished" datetime="2026-11-19T17:00:00+08:00">2026-11-19</time>
-            </span>
-          </div>
-      </header>
-    <div class="post-body" itemprop="articleBody">
-          <p>做前端习惯了接 Sentry 和埋点：把入参、返回值和 error.message 一股脑上报，排查问题最省事。搬到查数据库的 Agent 上，这个习惯会直接把监控后台变成明文数据泄漏口。这篇结合数问工作台的 Langfuse + OpenTelemetry 接入，讲清楚怎么做到默认只报元数据、导出层兜底脱敏，以及为什么异常不能在 SDK 回调里直接 throw。</p>
-          <!--noindex-->
-          <div class="post-button text-center">
-            <a class="btn" href="/2026/11/19/telemetry-default-no-content-and-safe-errors/#more" rel="contents">
               阅读全文 &raquo;
             </a>
           </div>
